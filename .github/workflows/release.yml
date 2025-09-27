@@ -1,0 +1,55 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create Plugin Zip
+        run: |
+          # Create a temporary directory for the package
+          mkdir -p package
+
+          # Copy the main extension files
+          cp inkscape_mcp.inx package/
+          cp inkscape_mcp.py package/
+
+          # Copy the entire inkmcp subfolder maintaining structure
+          cp -r inkmcp package/
+
+          # Create the zip file
+          cd package
+          zip -r ../inkmcp-extension.zip .
+          cd ..
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Latest Development Build
+          body: |
+            This release contains the latest development builds of the Inkscape MCP plugin.
+
+            ## Installation
+            1. Download `inkmcp-extension.zip`
+            2. Extract it to your Inkscape extensions directory:
+               - Linux: `~/.config/inkscape/extensions/`
+               - Windows: `%APPDATA%\inkscape\extensions\`
+               - macOS: `~/.config/inkscape/extensions/`
+            3. Restart Inkscape
+            4. The extension will appear under Extensions > MCP
+          draft: false
+          prerelease: true
+          files: |
+            inkmcp-extension.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

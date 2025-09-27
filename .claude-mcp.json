@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "inkscape-mcp": {
+      "command": "bash",
+      "args": [
+        "-c",
+        "source global3.13/bin/activate && python -m inkscape_mcp.server"
+      ],
+      "cwd": "/home/khemadeva/hari/dev/code/localgits/aiassisted/inkmcp"
+    }
+  }
+}
