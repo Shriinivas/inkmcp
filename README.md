@@ -193,14 +193,6 @@ gdbus introspect --session --dest org.inkscape.Inkscape --object-path /org/inksc
 2. Implement `execute(svg, params)` function
 3. Add corresponding MCP tool in `inkscape_mcp_server.py`
 
-### Testing
-```bash
-# Test individual operations
-python test_units.py
-
-# Test MCP tools
-python test_mcp_tools.py
-```
 
 ## License
 
