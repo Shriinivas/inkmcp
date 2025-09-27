@@ -610,6 +610,11 @@ def execute_inkex_code(ctx: Context, code: str, return_output: bool = True) -> s
     - element.set('style', 'fill:#ff0000;stroke:#000000;stroke-width:2')
     - element.set('fill', '#ff0000'); element.set('stroke', '#000000')
 
+    Gradients (proper Inkscape gradient definition):
+    - Linear: grad = inkex.LinearGradient(); grad.set('id', 'myGrad'); defs.append(grad)
+    - Radial: rgrad = inkex.RadialGradient(); rgrad.set('xlink:href', '#myGrad'); rgrad.set('gradientUnits', 'userSpaceOnUse'); rgrad.set('cx', '100'); defs.append(rgrad)
+    - Usage: element.set('style', 'fill:url(#gradientId);stroke:none')
+
     Finding/Modifying Elements:
     - elem = svg.getElementById('my-id'); elem.set('fill', 'blue') if elem is not None else None
     - for e in svg.iter(): e.set('opacity', '0.5') if e.tag.endswith('circle') else None
