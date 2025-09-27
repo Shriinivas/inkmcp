@@ -3,7 +3,7 @@ name: Create Release
 on:
   push:
     tags:
-      - '*'
+      - "*"
 
 jobs:
   build:
@@ -41,10 +41,7 @@ jobs:
 
             ## Installation
             1. Download `inkmcp-extension.zip`
-            2. Extract it to your Inkscape extensions directory:
-               - Linux: `~/.config/inkscape/extensions/`
-               - Windows: `%APPDATA%\inkscape\extensions\`
-               - macOS: `~/.config/inkscape/extensions/`
+            2. Extract it to your Inkscape extensions directory: `~/.config/inkscape/extensions/` (Linux)
             3. Restart Inkscape
             4. The extension will appear under Extensions > MCP
           draft: false
@@ -53,3 +50,4 @@ jobs:
             inkmcp-extension.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
