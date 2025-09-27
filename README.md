@@ -18,8 +18,6 @@ A Model Context Protocol (MCP) server that enables live control of Inkscape thro
 
 ### 1. Installation (Linux Only)
 
-#### Option A: Download Release Zip (Recommended)
-
 1. Go to the [Releases page](https://github.com/Shriinivas/inkmcp/releases)
 2. Download `inkmcp-extension.zip` from the latest release
 3. Extract it to your Inkscape extensions directory:
@@ -28,17 +26,6 @@ A Model Context Protocol (MCP) server that enables live control of Inkscape thro
    unzip ~/Downloads/inkmcp-extension.zip
    ```
 
-#### Option B: Manual Installation
-
-Extract to your Inkscape extensions directory:
-```bash
-~/.config/inkscape/extensions/
-
-# Copy files maintaining structure:
-# inkscape_mcp.py
-# inkscape_mcp.inx
-# inkmcp/ (folder with server and tools)
-```
 
 ### 2. Make Scripts Executable
 
