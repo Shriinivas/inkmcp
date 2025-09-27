@@ -4,15 +4,15 @@ A Model Context Protocol (MCP) server that enables live control of Inkscape thro
 
 ## Features
 
-🎯 **Live Instance Control** - Direct manipulation of running Inkscape documents
-⚡ **D-Bus Integration** - Real-time communication with zero latency
-📐 **Comprehensive API** - From simple shapes to complex inkex Python code
-🖼️ **Screenshot Support** - Visual feedback with viewport capture
+- 🎯 **Live Instance Control** - Direct manipulation of running Inkscape documents
+- ⚡ **D-Bus Integration** - Real-time communication with zero latency
+- 📐 **Comprehensive API** - From simple shapes to complex inkex Python code
+- 🖼️ **Screenshot Support** - Visual feedback with viewport capture
 
 ## Platform Support
 
-**⚠️ Currently Linux Only** - Uses D-Bus which is Linux-specific
-**🔮 Future**: Cross-platform support possible via TCP sockets/named pipes
+- **⚠️ Currently Linux Only** - Uses D-Bus which is Linux-specific
+- **🔮 Future**: Cross-platform support possible via TCP sockets/named pipes
 
 ## Quick Start
 
@@ -20,7 +20,7 @@ A Model Context Protocol (MCP) server that enables live control of Inkscape thro
 
 #### Option A: Download Release Zip (Recommended)
 
-1. Go to the [Releases page](https://github.com/yourusername/inkmcp/releases)
+1. Go to the [Releases page](https://github.com/Shriinivas/inkmcp/releases)
 2. Download `inkmcp-extension.zip` from the latest release
 3. Extract it to your Inkscape extensions directory:
    ```bash
@@ -217,5 +217,5 @@ python test_mcp_tools.py
 
 ## License
 
-GPL3
+[GPL-3.0](https://github.com/Shriinivas/inkmcp/blob/main/LICENSE)
 
