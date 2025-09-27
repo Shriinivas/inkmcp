@@ -5,7 +5,7 @@ A Model Context Protocol (MCP) server that enables live control of Inkscape thro
 ## Features
 
 - 🎯 **Live Instance Control** - Direct manipulation of running Inkscape documents
-- ⚡ **D-Bus Integration** - Real-time communication with zero latency
+- ⚡ **D-Bus Integration** - Real-time communication
 - 📐 **Comprehensive API** - From simple shapes to complex inkex Python code
 - 🖼️ **Screenshot Support** - Visual feedback with viewport capture
 
