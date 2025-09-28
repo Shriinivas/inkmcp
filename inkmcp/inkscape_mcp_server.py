@@ -15,9 +15,10 @@ import subprocess
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
 from mcp.server.fastmcp import FastMCP, Context
+from mcp.types import ImageContent
 
 # Configure logging
 logging.basicConfig(
@@ -149,14 +150,16 @@ def draw_shape(ctx: Context, shape_type: str, **params) -> str:
 
     Parameters:
     - shape_type: Type of shape (rectangle, circle, ellipse, line, polygon, polyline, text, path)
-    - **params: Shape-specific parameters (x, y, width, height, cx, cy, r, fill, stroke, etc.)
+
+    Shape parameters (provide as named parameters):
+    - Rectangle: x, y, width, height (e.g. x=100, y=50, width=200, height=100)
+    - Circle: cx, cy, r (e.g. cx=150, cy=150, r=75)
+    - Ellipse: cx, cy, rx, ry (e.g. cx=100, cy=100, rx=50, ry=30)
+    - Line: x1, y1, x2, y2 (e.g. x1=0, y1=0, x2=100, y2=100)
+    - Text: x, y, text_content (e.g. x=50, y=200, text_content="Hello")
+    - Styling: fill, stroke, stroke_width, opacity (e.g. fill="blue", stroke="red")
 
     Returns element ID for further reference. For gradient fills, use create_gradient() first.
-
-    Examples:
-    - Rectangle: draw_shape("rectangle", x=100, y=50, width=200, height=100, fill="lightblue")
-    - Circle: draw_shape("circle", cx=150, cy=150, r=75, stroke="red", stroke_width=3)
-    - Text: draw_shape("text", x=50, y=200, text_content="Hello World!", font_size=18, fill="blue")
     """
     try:
         connection = get_inkscape_connection()
@@ -689,14 +692,14 @@ def execute_inkex_code(ctx: Context, code: str, return_output: bool = True) -> s
 
 
 @mcp.tool()
-def get_viewport_screenshot(ctx: Context, max_size: int = 800) -> str:
+def get_viewport_screenshot(ctx: Context, max_size: int = 800) -> Union[str, ImageContent]:
     """
-    Capture a screenshot of the current Inkscape document.
+    Capture a screenshot of the current Inkscape document and return it as a displayable image.
 
     Parameters:
     - max_size: Maximum size in pixels for the largest dimension (default: 800)
 
-    Returns the screenshot as an Image.
+    Returns the actual screenshot image that can be displayed directly by AI clients.
     """
     try:
         connection = get_inkscape_connection()
@@ -718,12 +721,17 @@ def get_viewport_screenshot(ctx: Context, max_size: int = 800) -> str:
 
                 # Check if we got base64 data
                 if "base64_data" in data:
-                    # Return file path info and suggest viewing the exported file
+                    # Return the actual image content that AI clients can display
+                    base64_data = data.get("base64_data", "")
                     export_path = data.get("export_path", "unknown")
                     file_size = data.get("file_size", 0)
-                    data_size = data.get("data_size", 0)
 
-                    return f"📸 **Screenshot captured successfully**\n\n**File**: {export_path}\n**Size**: {file_size} bytes\n**Image Data**: {data_size} chars (base64)\n**DPI**: {data.get('dpi', 96)}\n**Format**: PNG\n\n*Screenshot saved as PNG file*"
+                    # Create and return the image object directly
+                    return ImageContent(
+                        type="image",
+                        data=base64_data,
+                        mimeType="image/png"
+                    )
                 else:
                     # Fallback: return file path info
                     export_path = data.get("export_path", "unknown")
@@ -747,27 +755,26 @@ def create_gradient(
     gradient_type: str,
     stops: str,
     gradient_units: str = "userSpaceOnUse",
-    **kwargs
+    **additional_params
 ) -> str:
     """
     Create a gradient definition (linear or radial) that can be used to fill or stroke SVG elements.
 
     Parameters:
     - gradient_type: Either "linear" or "radial"
-    - stops: Gradient color stops as JSON string, e.g. '[["0%","blue"],["100%","red"]]'
+    - stops: Gradient color stops as JSON string (e.g. '[["0%","blue"],["100%","red"]]')
     - gradient_units: Coordinate system, "userSpaceOnUse" (default) or "objectBoundingBox"
-    - **kwargs: Gradient-specific positioning and additional attributes
 
-    For LINEAR gradients, provide:
-    - x1, y1: Start point coordinates (numeric values in user units)
-    - x2, y2: End point coordinates (numeric values in user units)
+    For LINEAR gradients, optionally provide:
+    - x1, y1, x2, y2: Start and end coordinates (e.g. x1=0, y1=0, x2=100, y2=100)
+    - If not provided, SVG uses defaults (horizontal gradient)
 
-    For RADIAL gradients, provide:
-    - cx, cy: Center coordinates (numeric values in user units)
-    - r: Radius (numeric value in user units)
-    - fx, fy: Optional focal point coordinates
+    For RADIAL gradients, optionally provide:
+    - cx, cy, r: Center coordinates and radius (e.g. cx=100, cy=100, r=50)
+    - fx, fy: Optional focal point (e.g. fx=90, fy=90)
+    - If not provided, SVG uses defaults (centered gradient)
 
-    Additional attributes: gradientTransform, spreadMethod, etc.
+    Additional: gradientTransform, spreadMethod, etc. as named parameters.
 
     Returns element ID of created gradient for use in fill="url(#gradientId)".
 
@@ -787,7 +794,7 @@ def create_gradient(
             "stops": stops,
             "gradientUnits": gradient_units
         }
-        params.update(kwargs)
+        params.update(additional_params)
 
         # Build command string
         param_parts = []
@@ -814,15 +821,15 @@ def create_gradient(
 
                 # Format response based on gradient type
                 if gradient_type == "radial":
-                    cx = kwargs.get("cx", "?")
-                    cy = kwargs.get("cy", "?")
-                    r = kwargs.get("r", "?")
+                    cx = additional_params.get("cx", "?")
+                    cy = additional_params.get("cy", "?")
+                    r = additional_params.get("r", "?")
                     return f"✅ **Radial gradient created**\n**ID**: `{gradient_id}`\n**Center**: ({cx}, {cy})\n**Radius**: {r}\n**Stops**: {stops_count}\n**Usage**: `fill=\"url(#{gradient_id})\"`"
                 else:  # linear
-                    x1 = kwargs.get("x1", "?")
-                    y1 = kwargs.get("y1", "?")
-                    x2 = kwargs.get("x2", "?")
-                    y2 = kwargs.get("y2", "?")
+                    x1 = additional_params.get("x1", "?")
+                    y1 = additional_params.get("y1", "?")
+                    x2 = additional_params.get("x2", "?")
+                    y2 = additional_params.get("y2", "?")
                     return f"✅ **Linear gradient created**\n**ID**: `{gradient_id}`\n**Start**: ({x1}, {y1})\n**End**: ({x2}, {y2})\n**Stops**: {stops_count}\n**Usage**: `fill=\"url(#{gradient_id})\"`"
             else:
                 error = cmd_result.get("data", {}).get("error", "Unknown error")

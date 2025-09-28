@@ -210,6 +210,13 @@ Examples:
   python inkmcpcli.py "rect x=10 y=10 width=100 height=50 stroke=blue"
   python inkmcpcli.py "polygon points=[[0,0],[100,0],[50,50]] fill=green"
 
+  # Create gradients
+  python inkmcpcli.py "radial-gradient cx=100 cy=100 r=50 stops='[[\"0%\",\"blue\"],[\"100%\",\"red\"]]'"
+  python inkmcpcli.py "linear-gradient x1=0 y1=0 x2=200 y2=200 stops='[[\"0%\",\"green\"],[\"100%\",\"red\"]]'"
+
+  # Use gradients in shapes
+  python inkmcpcli.py "circle cx=100 cy=100 r=75 fill='url(#radialGradient1)'"
+
   # Get information (with parsed output)
   python inkmcpcli.py --parse-out "get-selection"
   python inkmcpcli.py --parse-out "get-info"
