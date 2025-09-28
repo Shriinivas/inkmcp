@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<inkscape-extension xmlns="http://www.inkscape.org/namespace/inkscape/extension">
+  <name>Generic MCP Extension</name>
+  <id>org.mcp.inkscape.draw.generic</id>
+
+
+  <effect>
+    <object-type>all</object-type>
+  </effect>
+
+  <script>
+    <command location="inx" interpreter="python">generic_extension.py</command>
+  </script>
+</inkscape-extension>
