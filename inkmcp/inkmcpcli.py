@@ -63,8 +63,8 @@ class InkscapeMCPClient:
             param_str = parts[1]
 
             # Parse key=value pairs
-            # Handle quoted values and various formats - improved regex for quoted strings
-            param_pattern = r'(\w+(?:[_-]\w+)*)=("([^"]*)"|\'([^\']*)\'|(\[[^\]]*\])|([^\s]+))'
+            # Handle quoted values and various formats - improved regex for quoted strings and nested arrays
+            param_pattern = r'(\w+(?:[_-]\w+)*)=("([^"]*)"|\'([^\']*)\'|(\[(?:[^\[\]]|\[[^\]]*\])*\])|([^\s,]+))'
             raw_matches = re.findall(param_pattern, param_str)
 
             # Process matches to extract the actual value from the capture groups

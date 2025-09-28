@@ -278,3 +278,34 @@ def count_elements_by_type(svg) -> Dict[str, int]:
         tag = etree.QName(elem).localname
         element_counts[tag] = element_counts.get(tag, 0) + 1
     return element_counts
+
+
+def build_command_parameters(command_type: str, required_params: Dict[str, Any], variable_params: Dict[str, Any]) -> str:
+    """
+    Build command string from parameters, handling both AI client and direct call formats.
+
+    This handles the common pattern where AI clients pass a single 'params' string
+    while direct calls use individual keyword arguments.
+
+    Args:
+        command_type: The command type (e.g., 'circle', 'radial-gradient')
+        required_params: Dictionary of required parameters (e.g., {'stops': '...', 'gradientUnits': '...'})
+        variable_params: Dictionary of variable parameters from **params or **kwargs
+
+    Returns:
+        Complete command string ready for CLI execution
+    """
+    if len(variable_params) == 1 and "params" in variable_params:
+        # AI client passes a single 'params' string argument
+        param_str = variable_params["params"]
+    else:
+        # Direct keyword arguments (testing/manual use)
+        # Build parameters including required ones
+        all_params = {}
+        all_params.update(required_params)
+        all_params.update(variable_params)
+
+        param_pairs = [f"{k}={v}" for k, v in all_params.items()]
+        param_str = " ".join(param_pairs)
+
+    return f"{command_type} {param_str}".strip()

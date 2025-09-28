@@ -151,22 +151,28 @@ def draw_shape(ctx: Context, shape_type: str, **params) -> str:
     Parameters:
     - shape_type: Type of shape (rectangle, circle, ellipse, line, polygon, polyline, text, path)
 
-    Shape parameters (provide as named parameters):
-    - Rectangle: x, y, width, height (e.g. x=100, y=50, width=200, height=100)
-    - Circle: cx, cy, r (e.g. cx=150, cy=150, r=75)
-    - Ellipse: cx, cy, rx, ry (e.g. cx=100, cy=100, rx=50, ry=30)
-    - Line: x1, y1, x2, y2 (e.g. x1=0, y1=0, x2=100, y2=100)
-    - Text: x, y, text_content (e.g. x=50, y=200, text_content="Hello")
-    - Styling: fill, stroke, stroke_width, opacity (e.g. fill="blue", stroke="red")
+    Shape parameters (provide as separate keyword arguments):
+    - Rectangle: x, y, width, height
+    - Circle: cx, cy, r
+    - Ellipse: cx, cy, rx, ry
+    - Line: x1, y1, x2, y2
+    - Text: x, y, text_content
+    - Styling: fill, stroke, stroke_width, opacity
 
     Returns element ID for further reference. For gradient fills, use create_gradient() first.
+
+    Examples:
+    - draw_shape(shape_type="rectangle", x=100, y=50, width=200, height=100)
+    - draw_shape(shape_type="circle", cx=150, cy=150, r=75, fill="blue")
+    - draw_shape(shape_type="line", x1=0, y1=0, x2=100, y2=100, stroke="red")
     """
     try:
         connection = get_inkscape_connection()
 
-        # Handle different parameter formats from Claude Code
+        # Handle different parameter formats from AI clients
+        # TODO: Extract this to common function when server architecture allows operations_common import
         if len(params) == 1 and "params" in params:
-            # Claude Code passes a single 'params' string argument
+            # AI client passes a single 'params' string argument
             param_str = params["params"]
         else:
             # Direct keyword arguments (testing/manual use)
@@ -755,7 +761,7 @@ def create_gradient(
     gradient_type: str,
     stops: str,
     gradient_units: str = "userSpaceOnUse",
-    **additional_params
+    **params
 ) -> str:
     """
     Create a gradient definition (linear or radial) that can be used to fill or stroke SVG elements.
@@ -765,22 +771,30 @@ def create_gradient(
     - stops: Gradient color stops as JSON string (e.g. '[["0%","blue"],["100%","red"]]')
     - gradient_units: Coordinate system, "userSpaceOnUse" (default) or "objectBoundingBox"
 
-    For LINEAR gradients, optionally provide:
-    - x1, y1, x2, y2: Start and end coordinates (e.g. x1=0, y1=0, x2=100, y2=100)
-    - If not provided, SVG uses defaults (horizontal gradient)
+    For LINEAR gradients, provide as separate keyword arguments:
+    - x1: Start x coordinate (number)
+    - y1: Start y coordinate (number)
+    - x2: End x coordinate (number)
+    - y2: End y coordinate (number)
 
-    For RADIAL gradients, optionally provide:
-    - cx, cy, r: Center coordinates and radius (e.g. cx=100, cy=100, r=50)
-    - fx, fy: Optional focal point (e.g. fx=90, fy=90)
-    - If not provided, SVG uses defaults (centered gradient)
+    For RADIAL gradients, provide as separate keyword arguments:
+    - cx: Center x coordinate (number)
+    - cy: Center y coordinate (number)
+    - r: Radius (number)
+    - fx: Optional focal point x coordinate (number)
+    - fy: Optional focal point y coordinate (number)
 
-    Additional: gradientTransform, spreadMethod, etc. as named parameters.
+    Additional options as separate keyword arguments:
+    - gradientTransform: Transform attribute (string)
+    - spreadMethod: "pad", "reflect", or "repeat" (string)
 
     Returns element ID of created gradient for use in fill="url(#gradientId)".
 
     Examples:
-    - Linear: create_gradient("linear", '[["0%","green"],["100%","red"]]', x1=0, y1=0, x2=100, y2=100)
-    - Radial: create_gradient("radial", '[["0%","blue"],["100%","red"]]', cx=100, cy=100, r=50)
+    - Linear: create_gradient(gradient_type="linear", stops='[["0%","green"],["100%","red"]]', x1=0, y1=0, x2=100, y2=100)
+    - Radial: create_gradient(gradient_type="radial", stops='[["0%","blue"],["100%","red"]]', cx=100, cy=100, r=50)
+
+    IMPORTANT: Pass coordinates as separate keyword arguments, NOT as comma-separated strings.
     """
     try:
         connection = get_inkscape_connection()
@@ -789,22 +803,21 @@ def create_gradient(
         if gradient_type not in ["linear", "radial"]:
             return f"❌ Invalid gradient_type: {gradient_type}. Use 'linear' or 'radial'."
 
-        # Build command parameters
-        params = {
-            "stops": stops,
-            "gradientUnits": gradient_units
-        }
-        params.update(additional_params)
+        # Handle different parameter formats from AI clients
+        # TODO: Extract this to common function when server architecture allows operations_common import
+        if len(params) == 1 and "params" in params:
+            # AI client passes a single 'params' string argument
+            param_str = params["params"]
+            # Add stops and gradientUnits to the parameter string
+            param_str += f" stops={stops} gradientUnits={gradient_units}"
+        else:
+            # Direct keyword arguments (testing/manual use)
+            all_params = {"stops": stops, "gradientUnits": gradient_units}
+            all_params.update(params)
+            param_pairs = [f"{k}={v}" for k, v in all_params.items()]
+            param_str = " ".join(param_pairs)
 
-        # Build command string
-        param_parts = []
-        for key, value in params.items():
-            if isinstance(value, str) and (' ' in value or '"' in value):
-                param_parts.append(f"{key}='{value}'")
-            else:
-                param_parts.append(f"{key}={value}")
-
-        command = f"{gradient_type}-gradient {' '.join(param_parts)}"
+        command = f"{gradient_type}-gradient {param_str}".strip()
         result = connection.execute_cli_command(command)
 
         if not result["success"]:
@@ -818,18 +831,19 @@ def create_gradient(
                 data = cmd_result.get("data", {})
                 gradient_id = data.get("id", "unknown")
                 stops_count = data.get("stops_count", 0)
+                attributes = data.get("attributes", {})
 
-                # Format response based on gradient type
+                # Format response based on gradient type using actual created attributes
                 if gradient_type == "radial":
-                    cx = additional_params.get("cx", "?")
-                    cy = additional_params.get("cy", "?")
-                    r = additional_params.get("r", "?")
+                    cx = attributes.get("cx", "default")
+                    cy = attributes.get("cy", "default")
+                    r = attributes.get("r", "default")
                     return f"✅ **Radial gradient created**\n**ID**: `{gradient_id}`\n**Center**: ({cx}, {cy})\n**Radius**: {r}\n**Stops**: {stops_count}\n**Usage**: `fill=\"url(#{gradient_id})\"`"
                 else:  # linear
-                    x1 = additional_params.get("x1", "?")
-                    y1 = additional_params.get("y1", "?")
-                    x2 = additional_params.get("x2", "?")
-                    y2 = additional_params.get("y2", "?")
+                    x1 = attributes.get("x1", "default")
+                    y1 = attributes.get("y1", "default")
+                    x2 = attributes.get("x2", "default")
+                    y2 = attributes.get("y2", "default")
                     return f"✅ **Linear gradient created**\n**ID**: `{gradient_id}`\n**Start**: ({x1}, {y1})\n**End**: ({x2}, {y2})\n**Stops**: {stops_count}\n**Usage**: `fill=\"url(#{gradient_id})\"`"
             else:
                 error = cmd_result.get("data", {}).get("error", "Unknown error")
