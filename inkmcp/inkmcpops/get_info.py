@@ -1,7 +1,10 @@
 """Document information retrieval operation"""
 
 import inkex
-from lxml import etree
+import os
+import sys
+sys.path.append(os.path.dirname(__file__))
+from operations_common import create_success_response, count_elements_by_type
 
 def execute(svg, params):
     """Get information about the current document"""
@@ -10,23 +13,15 @@ def execute(svg, params):
     height = svg.get('height', 'unknown')
     viewbox = svg.get('viewBox', 'none')
 
-    # Count elements
-    elements = list(svg.iter())
-    element_counts = {}
-    for elem in elements:
-        tag = etree.QName(elem).localname
-        element_counts[tag] = element_counts.get(tag, 0) + 1
+    # Count elements using common function
+    element_counts = count_elements_by_type(svg)
 
-    info = {
-        "document": {
+    return create_success_response(
+        message="Document information retrieved successfully",
+        document={
             "width": width,
             "height": height,
             "viewBox": viewbox,
             "element_counts": element_counts
         }
-    }
-
-    return {
-        "status": "success",
-        "data": info
-    }
+    )

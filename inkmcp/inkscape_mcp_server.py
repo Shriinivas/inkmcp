@@ -145,11 +145,13 @@ mcp = FastMCP("InkscapeMCP", lifespan=server_lifespan)
 @mcp.tool()
 def draw_shape(ctx: Context, shape_type: str, **params) -> str:
     """
-    Draw a shape in Inkscape with specified parameters.
+    Draw a single shape in Inkscape with specified parameters. Preferred for basic shape creation.
 
     Parameters:
     - shape_type: Type of shape (rectangle, circle, ellipse, line, polygon, polyline, text, path)
     - **params: Shape-specific parameters (x, y, width, height, cx, cy, r, fill, stroke, etc.)
+
+    Returns element ID for further reference. For gradient fills, use create_gradient() first.
 
     Examples:
     - Rectangle: draw_shape("rectangle", x=100, y=50, width=200, height=100, fill="lightblue")
@@ -580,51 +582,26 @@ def execute_inkex_code(ctx: Context, code: str, return_output: bool = True) -> s
     """
     Execute arbitrary Python/inkex code in the Inkscape extension context.
 
-    This provides the same flexibility as Blender MCP - you can run any Python code
-    with full access to the inkex API and SVG document manipulation.
+    ⚠️ WHEN TO USE: Complex operations, algorithms, batch processing, custom element relationships.
+    ✅ PREFER: draw_shape() for shapes, create_gradient() for gradients, other specific tools when available.
 
     Parameters:
     - code: Python code string to execute in the inkex context
     - return_output: Whether to capture and return stdout/stderr (default: True)
 
-    Available in execution context:
-    - svg, self, document: The current SVG document/extension instance
-    - inkex module: import inkex (Rectangle, Circle, Ellipse, Polygon, etc.)
-    - Python libraries: math, random, json, re, os
+    Available variables: svg, self, document (SVG instance), inkex module, math, random, json, re, os
 
-    CRITICAL SYNTAX PATTERNS:
+    Key syntax patterns:
+    - Elements: element.set('attribute', 'value'); svg.append(element)
+    - Styling: element.set('style', 'fill:red;stroke:blue') or element.set('fill', 'red')
+    - Groups: group = inkex.Group(); group.append(element); svg.append(group)
+    - Transforms: element.set('transform', 'translate(10,20) scale(2)')
+    - Paths: path.set('d', 'M 10,10 L 100,100')
+    - Find/modify: elem = svg.getElementById('id'); elem.set('fill', 'blue') if elem else None
+    - Delete: elem.getparent().remove(elem) if elem else None
+    - IDs: svg.get_unique_id('prefix')
 
-    - Create elements with appropriate group and identifiable IDs, e.g. creating simple tree - create group (id: tree1)
-      with trunk (rectangle id: tree1-trunk), foliage (circles with ids foliage-1, foliage-2, foliage-3 etc.)
-
-    self refers to SvgDocumentElement here
-    - document = self
-    - rootElem = self.root
-
-    Shape Creation (use .set() method):
-    - rect = inkex.Rectangle(); rect.set('x', '10'); rect.set('width', '100'); svg.append(rect)
-    - circle = inkex.Circle(); circle.set('cx', '50'); circle.set('r', '25'); svg.append(circle)
-    - poly = inkex.Polygon(); poly.set('points', '0,0 100,0 50,50'); svg.append(poly)
-
-    Styling (NOT dicts - use strings or individual properties):
-    - element.set('style', 'fill:#ff0000;stroke:#000000;stroke-width:2')
-    - element.set('fill', '#ff0000'); element.set('stroke', '#000000')
-
-    Gradients (proper Inkscape gradient definition):
-    - Linear: grad = inkex.LinearGradient(); grad.set('id', 'myGrad'); defs.append(grad)
-    - Radial: rgrad = inkex.RadialGradient(); rgrad.set('xlink:href', '#myGrad'); rgrad.set('gradientUnits', 'userSpaceOnUse'); rgrad.set('cx', '100'); defs.append(rgrad)
-    - Usage: element.set('style', 'fill:url(#gradientId);stroke:none')
-
-    Finding/Modifying Elements:
-    - elem = svg.getElementById('my-id'); elem.set('fill', 'blue') if elem is not None else None
-    - for e in svg.iter(): e.set('opacity', '0.5') if e.tag.endswith('circle') else None
-
-    Deleting Elements (use 'is not None' check):
-    - elem = svg.getElementById('my-id')
-    - if elem is not None: elem.getparent().remove(elem)
-
-    Coordinate System: 1 user unit = 1mm in document coordinates
-    Groups: group = inkex.Group(); group.append(shape); svg.append(group)
+    Use when specific tools cannot achieve the desired complex manipulation.
     """
     try:
         connection = get_inkscape_connection()
@@ -762,6 +739,100 @@ def get_viewport_screenshot(ctx: Context, max_size: int = 800) -> str:
     except Exception as e:
         logger.error(f"Error in get_viewport_screenshot: {e}")
         return f"❌ Error capturing screenshot: {e}"
+
+
+@mcp.tool()
+def create_gradient(
+    ctx: Context,
+    gradient_type: str,
+    stops: str,
+    gradient_units: str = "userSpaceOnUse",
+    **kwargs
+) -> str:
+    """
+    Create a gradient definition (linear or radial) that can be used to fill or stroke SVG elements.
+
+    Parameters:
+    - gradient_type: Either "linear" or "radial"
+    - stops: Gradient color stops as JSON string, e.g. '[["0%","blue"],["100%","red"]]'
+    - gradient_units: Coordinate system, "userSpaceOnUse" (default) or "objectBoundingBox"
+    - **kwargs: Gradient-specific positioning and additional attributes
+
+    For LINEAR gradients, provide:
+    - x1, y1: Start point coordinates (numeric values in user units)
+    - x2, y2: End point coordinates (numeric values in user units)
+
+    For RADIAL gradients, provide:
+    - cx, cy: Center coordinates (numeric values in user units)
+    - r: Radius (numeric value in user units)
+    - fx, fy: Optional focal point coordinates
+
+    Additional attributes: gradientTransform, spreadMethod, etc.
+
+    Returns element ID of created gradient for use in fill="url(#gradientId)".
+
+    Examples:
+    - Linear: create_gradient("linear", '[["0%","green"],["100%","red"]]', x1=0, y1=0, x2=100, y2=100)
+    - Radial: create_gradient("radial", '[["0%","blue"],["100%","red"]]', cx=100, cy=100, r=50)
+    """
+    try:
+        connection = get_inkscape_connection()
+
+        # Validate gradient type
+        if gradient_type not in ["linear", "radial"]:
+            return f"❌ Invalid gradient_type: {gradient_type}. Use 'linear' or 'radial'."
+
+        # Build command parameters
+        params = {
+            "stops": stops,
+            "gradientUnits": gradient_units
+        }
+        params.update(kwargs)
+
+        # Build command string
+        param_parts = []
+        for key, value in params.items():
+            if isinstance(value, str) and (' ' in value or '"' in value):
+                param_parts.append(f"{key}='{value}'")
+            else:
+                param_parts.append(f"{key}={value}")
+
+        command = f"{gradient_type}-gradient {' '.join(param_parts)}"
+        result = connection.execute_cli_command(command)
+
+        if not result["success"]:
+            return f"❌ Error creating {gradient_type} gradient: {result['error']}"
+
+        # Parse response
+        cli_data = result["data"]
+        if cli_data.get("total_commands", 0) > 0:
+            cmd_result = cli_data["results"][0]["result"]
+            if cmd_result.get("status") == "success":
+                data = cmd_result.get("data", {})
+                gradient_id = data.get("id", "unknown")
+                stops_count = data.get("stops_count", 0)
+
+                # Format response based on gradient type
+                if gradient_type == "radial":
+                    cx = kwargs.get("cx", "?")
+                    cy = kwargs.get("cy", "?")
+                    r = kwargs.get("r", "?")
+                    return f"✅ **Radial gradient created**\n**ID**: `{gradient_id}`\n**Center**: ({cx}, {cy})\n**Radius**: {r}\n**Stops**: {stops_count}\n**Usage**: `fill=\"url(#{gradient_id})\"`"
+                else:  # linear
+                    x1 = kwargs.get("x1", "?")
+                    y1 = kwargs.get("y1", "?")
+                    x2 = kwargs.get("x2", "?")
+                    y2 = kwargs.get("y2", "?")
+                    return f"✅ **Linear gradient created**\n**ID**: `{gradient_id}`\n**Start**: ({x1}, {y1})\n**End**: ({x2}, {y2})\n**Stops**: {stops_count}\n**Usage**: `fill=\"url(#{gradient_id})\"`"
+            else:
+                error = cmd_result.get("data", {}).get("error", "Unknown error")
+                return f"❌ {error}"
+
+        return "❌ No response received"
+
+    except Exception as e:
+        logger.error(f"Error in create_gradient: {e}")
+        return f"❌ Error creating {gradient_type} gradient: {e}"
 
 
 def main():

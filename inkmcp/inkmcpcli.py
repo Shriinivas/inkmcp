@@ -51,6 +51,9 @@ class InkscapeMCPClient:
         elif action_part in ['rectangle', 'rect', 'circle', 'ellipse', 'line', 'polygon', 'polyline', 'text', 'path']:
             params['action'] = 'draw-shape'
             params['shape_type'] = action_part
+        elif action_part in ['radial-gradient', 'linear-gradient']:
+            params['action'] = 'add-gradient'
+            params['gradient_type'] = action_part
         else:
             # Assume it's a custom action
             params['action'] = action_part

@@ -11,6 +11,10 @@ from inkex import (
     Polyline,
     TextElement,
 )
+import os
+import sys
+sys.path.append(os.path.dirname(__file__))
+from operations_common import create_element_with_id, create_success_response, create_error_response
 
 # Shape type to inkex class mapping
 SHAPE_CLASSES = {
@@ -70,9 +74,9 @@ def execute(svg, params):
                 },
             }
 
-        # Create shape object dynamically
+        # Create shape object dynamically with unique ID
         ShapeClass = SHAPE_CLASSES[shape_type]
-        shape = ShapeClass()
+        shape = create_element_with_id(svg, ShapeClass, shape_type)
 
         # Separate style and geometric attributes
         style_params = {}
@@ -91,9 +95,14 @@ def execute(svg, params):
         # Set style attributes using inkex style API
         for style_attr, value in style_params.items():
             if style_attr in ["fill", "stroke"]:
-                shape.style.set_color(
-                    value if value and value.lower() != "none" else "none", style_attr
-                )
+                # Handle gradient URLs and special values directly
+                if (isinstance(value, str) and
+                    (value.startswith("url(") or value.lower() in ["none", "inherit", "currentcolor"])):
+                    shape.style[style_attr] = value
+                else:
+                    shape.style.set_color(
+                        value if value and value.lower() != "none" else "none", style_attr
+                    )
             else:
                 shape.style[style_attr] = str(value)
 
@@ -118,25 +127,18 @@ def execute(svg, params):
                     # For unitless strings, set directly
                     shape.set(attr, str(value))
 
-        new_id = svg.get_unique_id(shape_type)
-        shape.set("id", new_id)
         # Add to document
         svg.append(shape)
 
-        # Prepare response data
-        response_data = {
-            "message": f"{shape_type.title()} created successfully",
-            "shape_type": shape_type,
-            "attributes": geometric_params,
-            "id": new_id,
-            "style": style_params,
-        }
-
-        return {"status": "success", "data": response_data}
+        # Return standardized response
+        return create_success_response(
+            message=f"{shape_type.title()} created successfully",
+            element_id=shape.get('id'),
+            shape_type=shape_type,
+            attributes=geometric_params,
+            style=style_params
+        )
 
     except Exception as e:
-        return {
-            "status": "error",
-            "data": {"error": f"Shape creation failed: {str(e)}"},
-        }
+        return create_error_response(f"Shape creation failed: {str(e)}")
 

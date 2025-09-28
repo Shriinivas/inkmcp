@@ -1,7 +1,10 @@
 """Selection information retrieval operation"""
 
 import inkex
-from lxml import etree
+import os
+import sys
+sys.path.append(os.path.dirname(__file__))
+from operations_common import create_success_response, create_error_response, get_element_info
 
 def execute(svg, params):
     """Get information about currently selected elements"""
@@ -9,45 +12,19 @@ def execute(svg, params):
         # Get selected elements - Inkscape passes them via command line
         selected = svg.selected
 
-        selection_info = {
-            "selection": {
-                "count": len(selected),
-                "elements": []
-            }
-        }
-
-        # Extract info for each selected element
+        # Extract info for each selected element using common function
+        elements = []
         for elem_id, element in selected.items():
-            elem_info = {
-                "id": elem_id,
-                "tag": etree.QName(element).localname,
-                "attributes": dict(element.attrib)
+            elem_info = get_element_info(element)
+            elements.append(elem_info)
+
+        return create_success_response(
+            message="Selection information retrieved successfully",
+            selection={
+                "count": len(selected),
+                "elements": elements
             }
-
-            # Get bounding box if possible
-            try:
-                bbox = element.bounding_box()
-                if bbox:
-                    elem_info["bbox"] = {
-                        "x": bbox.left,
-                        "y": bbox.top,
-                        "width": bbox.width,
-                        "height": bbox.height
-                    }
-            except:
-                pass
-
-            selection_info["selection"]["elements"].append(elem_info)
-
-        return {
-            "status": "success",
-            "data": selection_info
-        }
+        )
 
     except Exception as e:
-        return {
-            "status": "error",
-            "data": {
-                "error": f"Failed to get selection info: {str(e)}"
-            }
-        }
+        return create_error_response(f"Failed to get selection info: {str(e)}")

@@ -107,23 +107,25 @@ command = "/home/USERNAME/.config/inkscape/extensions/inkmcp/run_inkscape_mcp.sh
 ### With AI Assistant (Claude Code/Gemini/etc) - Requires Running Inkscape
 ```
 "In Inkscape, draw a smooth sine wave starting at the left edge in the middle of the document"
-"In Inkscape, create a beautiful logo with a gradient circle and elegant typography"
+"In Inkscape, create a beautiful logo with a radial gradient circle and elegant typography"
 "In Inkscape, draw a mathematical spiral using varying circle sizes with golden ratio"
 "In Inkscape, create a house illustration with gable roof, wooden door, and flower garden"
-"In Inkscape, design a data visualization chart with bars and labels using current document size"
+"In Inkscape, design a data visualization chart with gradient bars and labels using current document size"
+"In Inkscape, create a sunset scene with linear gradient sky and radial gradient sun"
 "In Inkscape, export the current document as high-resolution PNG for presentation"
 ```
 
 ## Available MCP Tools
 
 1. **draw_shape** - Create geometric shapes (rectangle, circle, ellipse, line, polygon, text, path)
-2. **get_selection_info** - Get details about currently selected objects
-3. **get_document_info** - Document dimensions, viewBox, element counts
-4. **get_object_info** - Detailed object information by ID/name/type
-5. **get_object_property** - Get specific properties from objects
-6. **execute_inkex_code** - Run arbitrary Python/inkex code in live context
-7. **batch_draw** - Execute multiple drawing commands efficiently
-8. **get_viewport_screenshot** - Capture current view as PNG
+2. **create_gradient** - Create linear and radial gradients for fills and strokes
+3. **get_selection_info** - Get details about currently selected objects
+4. **get_document_info** - Document dimensions, viewBox, element counts
+5. **get_object_info** - Detailed object information by ID/name/type
+6. **get_object_property** - Get specific properties from objects
+7. **execute_inkex_code** - Run arbitrary Python/inkex code in live context
+8. **batch_draw** - Execute multiple drawing commands efficiently
+9. **get_viewport_screenshot** - Capture current view as PNG
 
 ## Technical Details
 
@@ -143,8 +145,19 @@ AI Assistant → MCP Server → CLI Client → D-Bus → Inkscape Extension → 
 ### Direct CLI Usage (For Testing/Development)
 ```bash
 # In the inkmcp directory - bypasses AI assistant for direct control
+
+# Basic shapes
 ./inkmcpcli.py "circle cx=100 cy=100 r=50 fill=red"
 ./inkmcpcli.py "rectangle x=0 y=0 width=200 height=100 stroke=blue"
+
+# Gradients (returns gradient ID for use in fills)
+./inkmcpcli.py "radial-gradient cx=100 cy=100 r=50 stops='[[\"0%\",\"blue\"],[\"100%\",\"red\"]]'"
+./inkmcpcli.py "linear-gradient x1=0 y1=0 x2=200 y2=200 stops='[[\"0%\",\"green\"],[\"50%\",\"yellow\"],[\"100%\",\"red\"]]'"
+
+# Using gradients in shapes
+./inkmcpcli.py "circle cx=100 cy=100 r=75 fill='url(#radialGradient1)'"
+
+# Complex code execution
 ./inkmcpcli.py "execute-inkex-code code='circle = Circle(); circle.set(\"cx\", \"150\"); svg.append(circle)'"
 ```
 

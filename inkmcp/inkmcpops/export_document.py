@@ -3,7 +3,16 @@
 import inkex
 from inkex.command import call
 import os
+import sys
 import tempfile
+sys.path.append(os.path.dirname(__file__))
+from operations_common import (
+    create_success_response,
+    create_error_response,
+    create_temp_file,
+    safe_file_cleanup,
+    get_file_info
+)
 
 def execute(svg, params):
     """Export current document as image or SVG using inkex command system"""
@@ -13,11 +22,9 @@ def execute(svg, params):
         output_path = params.get('output_path')
         dpi = params.get('dpi', 96)
 
-        # Generate output path if not provided
+        # Generate output path if not provided using common utility
         if not output_path:
-            import time
-            timestamp = str(int(time.time()))
-            output_path = tempfile.mktemp(suffix=f'.{format_type}', prefix=f'inkscape_export_{timestamp}_')
+            output_path = create_temp_file(f'.{format_type}', 'inkscape_export_')
 
         # Save current document to temp SVG file
         temp_svg = tempfile.mktemp(suffix='.svg')
@@ -38,30 +45,20 @@ def execute(svg, params):
                  f'--export-filename={output_path}',
                  temp_svg)
         else:
-            return {
-                "status": "error",
-                "data": {"error": f"Unsupported format: {format_type}"}
-            }
+            return create_error_response(f"Unsupported format: {format_type}")
 
-        # Clean up temp file
-        if os.path.exists(temp_svg):
-            os.remove(temp_svg)
+        # Clean up temp file using common utility
+        safe_file_cleanup(temp_svg)
 
-        # Get file size
-        file_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+        # Get file info using common utility
+        file_info = get_file_info(output_path)
 
-        return {
-            "status": "success",
-            "data": {
-                "message": f"Document exported as {format_type.upper()}",
-                "output_path": output_path,
-                "format": format_type,
-                "file_size": file_size
-            }
-        }
+        return create_success_response(
+            message=f"Document exported as {format_type.upper()}",
+            output_path=output_path,
+            format=format_type,
+            file_size=file_info.get('size', 0)
+        )
 
     except Exception as e:
-        return {
-            "status": "error",
-            "data": {"error": f"Export failed: {str(e)}"}
-        }
+        return create_error_response(f"Export failed: {str(e)}")
