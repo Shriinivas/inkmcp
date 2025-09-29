@@ -83,7 +83,7 @@ def ensure_defs_section(svg):
 
 def get_unique_id(svg, tag_name: str, custom_id: str = None) -> str:
     """
-    Generate unique ID for element
+    Generate unique ID for element with collision detection and auto-increment
 
     Args:
         svg: SVG document
@@ -91,9 +91,17 @@ def get_unique_id(svg, tag_name: str, custom_id: str = None) -> str:
         custom_id: Optional custom ID
 
     Returns:
-        Unique ID string
+        Unique ID string (auto-incremented if collision detected)
     """
     if custom_id:
+        # Check for collision and auto-increment if needed
+        original_id = custom_id
+        counter = 1
+
+        while svg.getElementById(custom_id) is not None:
+            custom_id = f"{original_id}_{counter}"
+            counter += 1
+
         return custom_id
 
     # Use tag name as prefix, converting camelCase to lowercase

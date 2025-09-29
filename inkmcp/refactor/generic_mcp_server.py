@@ -93,14 +93,17 @@ class InkscapeConnection:
                 f"{self.dbus_interface}.Activate",
                 self.action_name,
                 "[]",
-                "{}"
+                "{}",
             ]
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
             if result.returncode != 0:
                 logger.error(f"D-Bus command failed: {result.stderr}")
-                return {"status": "error", "data": {"error": f"D-Bus call failed: {result.stderr}"}}
+                return {
+                    "status": "error",
+                    "data": {"error": f"D-Bus call failed: {result.stderr}"},
+                }
 
             # Read response from response file
             response_file = operation_data.get("response_file")
@@ -112,7 +115,10 @@ class InkscapeConnection:
                     return response_data
                 except Exception as e:
                     logger.error(f"Failed to read response file: {e}")
-                    return {"status": "error", "data": {"error": f"Response file error: {e}"}}
+                    return {
+                        "status": "error",
+                        "data": {"error": f"Response file error: {e}"},
+                    }
             else:
                 # Assume success if no response file specified
                 return {"status": "success", "data": {"message": "Operation completed"}}
@@ -194,8 +200,10 @@ def format_response(result: Dict[str, Any]) -> str:
                 details.append(f"**Elements**: {len(elements)} items")
                 # Show first few elements
                 for i, elem in enumerate(elements[:3]):
-                    elem_desc = f"{elem.get('tag', 'unknown')} ({elem.get('id', 'no-id')})"
-                    details.append(f"  {i+1}. {elem_desc}")
+                    elem_desc = (
+                        f"{elem.get('tag', 'unknown')} ({elem.get('id', 'no-id')})"
+                    )
+                    details.append(f"  {i + 1}. {elem_desc}")
                 if len(elements) > 3:
                     details.append(f"  ... and {len(elements) - 3} more")
 
@@ -214,11 +222,30 @@ def format_response(result: Dict[str, Any]) -> str:
         if "elements_created" in data and data["elements_created"]:
             details.append(f"**Created**: {len(data['elements_created'])} elements")
 
-        # ID mapping details (new feature)
+        # ID mapping (requested → actual)
         if "id_mapping" in data and data["id_mapping"]:
-            details.append("**ID Mappings**:")
-            for map_id, actual_id in data["id_mapping"].items():
-                details.append(f"  {map_id} → {actual_id}")
+            details.append("**Element IDs** (requested → actual):")
+            for requested_id, actual_id in data["id_mapping"].items():
+                if requested_id == actual_id:
+                    details.append(f"  {requested_id} ✓")
+                else:
+                    details.append(
+                        f"  {requested_id} → {actual_id} (collision resolved)"
+                    )
+
+        # Warning for missing IDs
+        if "generated_ids" in data and data["generated_ids"]:
+            details.append("⚠️  **WARNING: Elements created without IDs**")
+            details.append(
+                "For better scene management, always specify 'id' for elements:"
+            )
+            for gen_id in data["generated_ids"]:
+                # Extract element type from generated ID (e.g., "circle2863" → "circle")
+                elem_type = "".join(c for c in gen_id if c.isalpha())
+                details.append(f"  {gen_id} (use: {elem_type} id=my_name ...)")
+            details.append(
+                "This enables later modification with execute-code commands."
+            )
 
         # Build final response
         if details:
@@ -236,53 +263,83 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
     """
     Execute any Inkscape operation using the generic extension system.
 
-    This unified tool handles all SVG operations dynamically using a single string command
-    with consistent syntax for all operations - element creation, document queries, exports, and code execution.
+    CRITICAL SYNTAX RULES - READ CAREFULLY:
+    1. Single string parameter with space-separated key=value pairs
+    2. Children use special bracket syntax: children=[{tag attr=val attr=val}, {tag attr=val}]
+    3. NOT JSON objects - use space-separated attributes inside braces
+    4. Use 'svg' variable in execute-code, NOT 'self.svg'
 
-    Parameter:
-    - command: Operation command string with space-separated key=value parameters
+    Parameter: command (str) - Command string following exact syntax below
 
-    ELEMENT CREATION:
-    Create any SVG element with attributes and nested children:
-    - "rect x=100 y=50 width=200 height=100 fill=blue"
-    - "circle cx=150 cy=150 r=75 fill='url(#myGradient)'"
-    - "g map_id=myGroup children=[{rect map_id=rect_1 x=0 y=0 width=50 height=50}, {circle map_id=circle_1 cx=25 cy=25 r=20}]"
+    ═══ BASIC ELEMENTS ═══
+    MANDATORY: Always specify id for every element to enable later modification:
+    ✅ CORRECT: "rect id=main_rect x=100 y=50 width=200 height=100 fill=blue stroke=black stroke-width=2"
+    ✅ CORRECT: "circle id=logo_circle cx=150 cy=150 r=75 fill=#ff0000"
+    ✅ CORRECT: "text id=title_text x=50 y=100 text='Hello World' font-size=16 fill=black"
 
-    GRADIENT CREATION:
-    - "linearGradient map_id=grad1 stops='[[\"0%\",\"red\"],[\"100%\",\"blue\"]]' x1=0 y1=0 x2=100 y2=100"
-    - "radialGradient map_id=grad2 stops='[[\"0%\",\"white\"],[\"100%\",\"black\"]]' cx=100 cy=100 r=50"
+    ❌ WRONG: "rect x=100 y=50 width=200" - Missing id! Always specify id for element management
+    ❌ WRONG: {"rect": {"x": 100, "y": 50}} - This is JSON, we don't use JSON!
 
-    INFORMATION OPERATIONS:
-    - "get-selection" - Get info about currently selected objects
-    - "get-info" - Get document dimensions and element counts
-    - "get-info-by-id id=element_id" - Get specific element information
+    ═══ NESTED ELEMENTS (Groups) ═══
+    Groups with children - ALWAYS specify id for parent and ALL children:
+    ✅ CORRECT: "g id=house children=[{rect id=house_body x=100 y=200 width=200 height=150 fill=#F5DEB3}, {path id=house_roof d='M 90,200 L 200,100 L 310,200 Z' fill=#A52A2A}]"
 
-    EXPORT OPERATIONS:
-    - "export-document-image format=png return_base64=true" - Screenshot as base64 image
-    - "export-document-image format=svg area=selection" - Export selection as SVG file
+    ❌ WRONG: "g children=[{rect x=100 y=200}]" - Missing id for group and rect!
+    ❌ WRONG: "g children=[{\"rect\": {\"x\": 100}}]" - Don't use JSON syntax!
+    ❌ WRONG: "g children=[rect x=100 y=200]" - Missing braces around each child!
 
-    CODE EXECUTION:
-    - "execute-code code='for i in range(3): svg.append(inkex.Rectangle(x=i*50, y=0, width=40, height=40))'"
+    ═══ CODE EXECUTION ═══
+    Execute Python code - use 'svg' variable, not 'self.svg':
+    ✅ CORRECT: "execute-code code='rect = inkex.Rectangle(x=100, y=100, width=100, height=100); rect.set(\"fill\", \"blue\"); svg.append(rect)'"
+    ✅ CORRECT: "execute-code code='for i in range(3): svg.append(inkex.Circle(cx=i*50, cy=100, r=20))'"
 
-    ID MAPPING SYSTEM:
-    Use map_id parameter to assign logical IDs that get mapped to actual generated IDs:
-    - Client sends: "g map_id=header children=[{rect map_id=bg x=0 y=0}, {text map_id=title text='Hello'}]"
-    - Server returns: {"id_mapping": {"header": "g_123", "bg": "rect_456", "title": "text_789"}}
-    - All map_ids within a single command must be unique
+    ❌ WRONG: "execute-code code='self.svg.append(...)'" - Use 'svg' not 'self.svg'!
 
-    SYNTAX RULES:
-    - Parameters: key=value separated by spaces
-    - Quotes: Use single or double quotes for values with spaces/special chars
-    - Children: Use children=[{...}, {...}] for nested elements
-    - Lists: JSON format for arrays like stops='[["0%","red"],["100%","blue"]]'
+    ═══ INFO & EXPORT OPERATIONS ═══
+    ✅ "get-selection" - Get info about selected objects
+    ✅ "get-info" - Get document information
+    ✅ "export-document-image format=png return_base64=true" - Screenshot
 
-    Returns consistent formatted responses with operation results and ID mappings for element creation.
+    ═══ GRADIENTS ═══
+    ✅ "linearGradient stops='[[\"0%\",\"red\"],[\"100%\",\"blue\"]]' x1=0 y1=0 x2=100 y2=100"
+
+    ═══ ID MANAGEMENT ═══
+    ALWAYS specify id for every element - this enables later modification and scene management:
+    - Input: "g id=scene children=[{rect id=house x=0 y=0}, {circle id=sun cx=100 cy=50}]"
+    - Returns: {"id_mapping": {"scene": "scene", "house": "house", "sun": "sun"}}
+    - Collision handling: If "house" exists, creates "house_1" and returns {"house": "house_1"}
+
+    Benefits of using IDs:
+    - Direct access: svg.getElementById("house") in later execute-code commands
+    - Scene management: Modify specific elements by ID
+    - Clear organization: Hierarchical naming (house_body, house_roof, etc.)
+
+    ═══ SEMANTIC SCENE ORGANIZATION ═══
+    When creating complex scenes, use hierarchical grouping with descriptive IDs:
+
+    Example - Creating a park scene with tree:
+    ✅ "g id=park_scene children=[{g id=tree1 children=[{rect id=trunk1 x=100 y=200 width=20 height=60 fill=brown}, {circle id=foliage1_1 cx=110 cy=180 r=25 fill=green}, {circle id=foliage1_2 cx=105 cy=175 r=20 fill=darkgreen}]}, {g id=house children=[{rect id=house_body x=200 y=180 width=80 height=60 fill=beige}, {polygon id=house_roof points='195,180 240,150 285,180' fill=red}]}]"
+
+    ID Naming Examples:
+    - Scene: id=park_scene, id=city_view, id=landscape
+    - Objects: id=tree1, id=tree2, id=house, id=car1
+    - Parts: id=trunk1, id=house_body, id=car1_wheel_left
+    - Sub-parts: id=foliage1_1, id=foliage1_2, id=house_window1
+
+    Later Modification Examples:
+    - Change trunk color: execute-code code="svg.getElementById('trunk1').set('fill', 'darkbrown')"
+    - Move entire tree: execute-code code="svg.getElementById('tree1').set('transform', 'translate(50,0)')"
+    - Add details: execute-code code="svg.getElementById('house').append(new_window_element)"
+
+    REMEMBER: Space-separated key=value pairs, NOT JSON! Use 'svg' in code, NOT 'self.svg'!
     """
     try:
         connection = get_inkscape_connection()
 
         # Create unique response file for this operation
-        response_fd, response_file = tempfile.mkstemp(suffix='.json', prefix='mcp_response_')
+        response_fd, response_file = tempfile.mkstemp(
+            suffix=".json", prefix="mcp_response_"
+        )
         os.close(response_fd)
 
         # Parse the command string using the same logic as our client
@@ -299,17 +356,14 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
         result = connection.execute_operation(parsed_data)
 
         # Handle image export special case
-        if (parsed_data.get("tag") == "export-document-image" and
-            result.get("status") == "success" and
-            "base64_data" in result.get("data", {})):
-
+        if (
+            parsed_data.get("tag") == "export-document-image"
+            and result.get("status") == "success"
+            and "base64_data" in result.get("data", {})
+        ):
             # Return actual image for viewport screenshot
             base64_data = result["data"]["base64_data"]
-            return ImageContent(
-                type="image",
-                data=base64_data,
-                mimeType="image/png"
-            )
+            return ImageContent(type="image", data=base64_data, mimeType="image/png")
 
         # Format and return text response
         return format_response(result)
@@ -320,7 +374,7 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
     finally:
         # Clean up response file if it exists
         try:
-            if 'response_file' in locals() and os.path.exists(response_file):
+            if "response_file" in locals() and os.path.exists(response_file):
                 os.remove(response_file)
         except:
             pass
@@ -334,3 +388,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -8,7 +8,7 @@ import inkex
 import json
 import os
 import tempfile
-from typing import Dict, Any
+from typing import Dict, Any, List
 from element_mapping import (
     get_element_class,
     should_place_in_defs,
@@ -39,7 +39,7 @@ class GenericElementCreator(inkex.EffectExtension):
     #     pass
 
     def create_element_recursive(
-        self, svg, element_data: Dict[str, Any], id_mapping: Dict[str, str] = None
+        self, svg, element_data: Dict[str, Any], id_mapping: Dict[str, str] = None, generated_ids: List[str] = None
     ) -> inkex.BaseElement:
         """
         Create SVG element recursively with children and track ID mappings
@@ -47,13 +47,16 @@ class GenericElementCreator(inkex.EffectExtension):
         Args:
             svg: SVG document
             element_data: Element data with tag, attributes, and children
-            id_mapping: Dictionary to collect map_id -> actual_id mappings
+            id_mapping: Dictionary to collect requested_id -> actual_id mappings
+            generated_ids: List to collect auto-generated IDs
 
         Returns:
             Created SVG element
         """
         if id_mapping is None:
             id_mapping = {}
+        if generated_ids is None:
+            generated_ids = []
 
         tag = element_data.get("tag", "")
         attributes = element_data.get("attributes", {})
@@ -67,26 +70,29 @@ class GenericElementCreator(inkex.EffectExtension):
         # Create element instance
         element = ElementClass()
 
-        # Handle map_id and regular id
-        map_id = attributes.get("map_id")
-        custom_id = attributes.get("id")
+        # Handle ID parameter - track both requested and generated
+        requested_id = attributes.get("id")
 
-        # Generate unique ID - prefer custom_id if provided, otherwise use tag
-        element_id = get_unique_id(svg, tag, custom_id)
-        element.set("id", element_id)
+        if requested_id:
+            # Use requested ID (with collision auto-increment)
+            actual_id = get_unique_id(svg, tag, requested_id)
+            # Track mapping for response
+            id_mapping[requested_id] = actual_id
+        else:
+            # No ID specified - auto-generate and track
+            actual_id = get_unique_id(svg, tag, None)
+            generated_ids.append(actual_id)
 
-        # Track map_id mapping if provided
-        if map_id:
-            id_mapping[map_id] = element_id
+        element.set("id", actual_id)
 
-        # Set all attributes except map_id and id (already handled)
+        # Set all attributes except id (already handled)
         for attr_name, attr_value in attributes.items():
-            if attr_name not in ("id", "map_id"):
+            if attr_name != "id":
                 element.set(attr_name, str(attr_value))
 
-        # Process children recursively with same id_mapping
+        # Process children recursively with same tracking lists
         for child_data in children:
-            child_element = self.create_element_recursive(svg, child_data, id_mapping)
+            child_element = self.create_element_recursive(svg, child_data, id_mapping, generated_ids)
             element.append(child_element)
 
         return element
@@ -241,9 +247,10 @@ class GenericElementCreator(inkex.EffectExtension):
             ElementClass = get_element_class(tag)
 
             if ElementClass:
-                # Create SVG element with ID mapping tracking
+                # Create SVG element with ID tracking
                 id_mapping = {}
-                element = self.create_element_recursive(self.svg, element_data, id_mapping)
+                generated_ids = []
+                element = self.create_element_recursive(self.svg, element_data, id_mapping, generated_ids)
 
                 # Determine placement
                 if should_place_in_defs(ElementClass):
@@ -260,12 +267,18 @@ class GenericElementCreator(inkex.EffectExtension):
                     "attributes": dict(element.attrib),
                 }
 
-                # Add ID mapping if any map_ids were used
+                # Add ID information to response
+                total_elements = len(id_mapping) + len(generated_ids)
+
                 if id_mapping:
                     response_data["id_mapping"] = id_mapping
-                    # Update message to reflect multiple elements if needed
-                    if len(id_mapping) > 1:
-                        response_data["message"] = f"{len(id_mapping)} elements created successfully"
+
+                if generated_ids:
+                    response_data["generated_ids"] = generated_ids
+
+                # Update message to reflect multiple elements if needed
+                if total_elements > 1:
+                    response_data["message"] = f"{total_elements} elements created successfully"
 
                 response = {
                     "status": "success",
