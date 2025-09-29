@@ -142,7 +142,7 @@ def parse_children_array(children_str: str) -> List[Dict[str, Any]]:
     return children
 
 
-def parse_tag_and_attributes(content: str) -> Dict[str, Any]:
+def parse_tag_and_attributes(content: str) -> Dict[str, Any] | None:
     """
     Parse content like "stop 'offset=\"0%\" stop-color=\"blue\"'" into element data
 
@@ -200,14 +200,14 @@ def parse_attributes(param_str: str) -> Dict[str, Any]:
 
     # Enhanced regex to handle quoted values, arrays, and objects (including multiline)
     # Pattern explanation:
-    # - (\w+(?:[_-]\w+)*) : key name with optional hyphens/underscores
+    # - (\w+(?:[:-]\w+)*) : key name with optional hyphens/underscores/colons (for namespaces)
     # - = : equals sign
     # - Group of alternatives for value:
     #   - "([^"]*)" : double quoted content (group 2)
     #   - '([^']*)' : single quoted content (group 3)
     #   - (\[(?:[^\[\]]|\{[^}]*\}|\[[^\]]*\])*\]) : array content (group 4)
     #   - ([^\s,=]+) : unquoted content (group 5)
-    param_pattern = r'(\w+(?:[_-]\w+)*)=("([^"]*)"|\'([^\']*)\'|(\[(?:[^\[\]]|\{[^}]*\}|\[[^\]]*\])*\])|([^\s,=]+))'
+    param_pattern = r'(\w+(?:[:-]\w+)*)=("([^"]*)"|\'([^\']*)\'|(\[(?:[^\[\]]|\{[^}]*\}|\[[^\]]*\])*\])|([^\s,=]+))'
     raw_matches = re.findall(param_pattern, param_str, re.DOTALL)
 
     for match in raw_matches:
@@ -266,7 +266,8 @@ class InkscapeClient:
         """
         # Use the unified parsing approach
         full_content = f"{tag} {param_str}".strip()
-        return parse_tag_and_attributes(full_content)
+        result = parse_tag_and_attributes(full_content)
+        return result if result is not None else {"tag": tag, "attributes": {}}
 
     def execute_command(self, element_data: Dict[str, Any]) -> Dict[str, Any]:
         """Execute command via D-Bus"""
@@ -591,7 +592,8 @@ def parse_command_string(command: str) -> Dict[str, Any]:
     Returns:
         Parsed element data dictionary
     """
-    return parse_tag_and_attributes(command)
+    result = parse_tag_and_attributes(command)
+    return result if result is not None else {"tag": "", "attributes": {}}
 
 
 if __name__ == "__main__":

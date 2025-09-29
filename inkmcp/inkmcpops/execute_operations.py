@@ -32,7 +32,7 @@ def execute_code(extension_instance, svg, attributes: Dict[str, Any]) -> Dict[st
             from inkex import Group, Layer, Use, Image, Marker, Gradient, Defs
             from inkex import Transform, Style, Color, Vector2d
             from inkex.paths import Path, Move, Line as PathLine, Curve, Arc
-            from inkex.elements import ShapeElement
+            from inkex.elements._base import ShapeElement
 
             execution_globals.update({
                 'inkex': inkex,

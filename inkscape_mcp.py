@@ -39,7 +39,7 @@ class ElementCreator(inkex.EffectExtension):
     #     pass
 
     def create_element_recursive(
-        self, svg, element_data: Dict[str, Any], id_mapping: Dict[str, str] = None, generated_ids: List[str] = None
+        self, svg, element_data: Dict[str, Any], id_mapping: Dict[str, str] | None = None, generated_ids: List[str] | None = None
     ) -> inkex.BaseElement:
         """
         Create SVG element recursively with children and track ID mappings

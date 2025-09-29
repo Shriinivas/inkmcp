@@ -13,6 +13,8 @@ TAG_TO_CLASS_MAPPING = {
     # Other common elements
     "use": "Use",
     "image": "Image",
+    # Inkscape specific elements (require namespace)
+    "inkscape:path-effect": "PathEffect",
 }
 
 # Module categories for placement logic
@@ -81,7 +83,7 @@ def ensure_defs_section(svg):
     return defs
 
 
-def get_unique_id(svg, tag_name: str, custom_id: str = None) -> str:
+def get_unique_id(svg, tag_name: str, custom_id: str | None = None) -> str:
     """
     Generate unique ID for element with collision detection and auto-increment
 

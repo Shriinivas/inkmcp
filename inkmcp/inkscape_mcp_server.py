@@ -251,7 +251,6 @@ def format_response(result: Dict[str, Any]) -> str:
         # Check if this is a failed code execution
         is_code_failure = (
             "execution_successful" in data and data["execution_successful"] == False
-            "execution_successful" in data and data["execution_successful"] == False
         )
 
         emoji = "❌" if is_code_failure else "✅"
@@ -281,53 +280,53 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
 
     ═══ BASIC ELEMENTS ═══
     MANDATORY: Always specify id for every element to enable later modification:
-    ✅ CORRECT: "rect id=main_rect x=100 y=50 width=200 height=100 fill=blue stroke=black stroke-width=2"
-    ✅ CORRECT: "circle id=logo_circle cx=150 cy=150 r=75 fill=#ff0000"
-    ✅ CORRECT: "text id=title_text x=50 y=100 text='Hello World' font-size=16 fill=black"
+    "rect id=main_rect x=100 y=50 width=200 height=100 fill=blue stroke=black stroke-width=2"
+    "circle id=logo_circle cx=150 cy=150 r=75 fill=#ff0000"
+    "text id=title_text x=50 y=100 text='Hello World' font-size=16 fill=black"
 
-    ❌ WRONG: "rect x=100 y=50 width=200" - Missing id! Always specify id for element management
-    ❌ WRONG: {"rect": {"x": 100, "y": 50}} - This is JSON, we don't use JSON!
+    ═══ AUTOMATIC ELEMENT PLACEMENT ═══
+    The system automatically places elements in the correct SVG sections:
+    - Basic elements (rect, circle, text, path, etc.) → placed directly in <svg>
+    - Definitions (linearGradient, radialGradient, pattern, filter, inkscape:path-effect, etc.) → automatically placed in <defs>
+
+    You don't need to worry about defs management - just create elements normally:
+    "linearGradient id=grad1 x1=0 y1=0 x2=100 y2=100" → automatically goes to <defs>
+    "rect id=shape1 x=50 y=50 width=100 height=100 fill=url(#grad1)" → uses the gradient
+
+    Path effects example (use inkscape: namespace for Inkscape-specific elements):
+    "inkscape:path-effect id=effect1 effect=powerstroke is_visible=true lpeversion=1.3 scale_width=1 interpolator_type=CentripetalCatmullRom interpolator_beta=0.2 start_linecap_type=zerowidth end_linecap_type=zerowidth offset_points='0.2,0.5 | 1,0.5 | 1.8,0.5' linejoin_type=round miter_limit=4 not_jump=false sort_points=true" → automatically goes to <defs>
+    "path id=mypath d='M 20,50 C 20,50 80,20 80,80' inkscape:path-effect=#effect1 inkscape:original-d='M 20,50 C 20,50 80,20 80,80'" → path with effect applied assuming the effect creation call returned path effect id effect1
 
     ═══ NESTED ELEMENTS (Groups) ═══
     Groups with children - ALWAYS specify id for parent and ALL children:
-    ✅ CORRECT: "g id=house children=[{rect id=house_body x=100 y=200 width=200 height=150 fill=#F5DEB3}, {path id=house_roof d='M 90,200 L 200,100 L 310,200 Z' fill=#A52A2A}]"
-
-    ❌ WRONG: "g children=[{rect x=100 y=200}]" - Missing id for group and rect!
-    ❌ WRONG: "g children=[{\"rect\": {\"x\": 100}}]" - Don't use JSON syntax!
-    ❌ WRONG: "g children=[rect x=100 y=200]" - Missing braces around each child!
+    "g id=house children=[{rect id=house_body x=100 y=200 width=200 height=150 fill=#F5DEB3}, {path id=house_roof d='M 90,200 L 200,100 L 310,200 Z' fill=#A52A2A}]"
 
     ═══ CODE EXECUTION ═══
     Execute Python code - use 'svg' variable, not 'self.svg':
     CRITICAL: inkex elements require .set() method with string values, NOT constructor arguments!
-
-    ✅ CORRECT: "execute-code code='rect = inkex.Rectangle(); rect.set(\"x\", \"100\"); rect.set(\"y\", \"100\"); rect.set(\"width\", \"100\"); rect.set(\"height\", \"100\"); rect.set(\"fill\", \"blue\"); svg.append(rect)'"
-    ✅ CORRECT: "execute-code code='circle = inkex.Circle(); circle.set(\"cx\", \"150\"); circle.set(\"cy\", \"100\"); circle.set(\"r\", \"20\"); svg.append(circle)'"
+    "execute-code code='rect = inkex.Rectangle(); rect.set(\"x\", \"100\"); rect.set(\"y\", \"100\"); rect.set(\"width\", \"100\"); rect.set(\"height\", \"100\"); rect.set(\"fill\", \"blue\"); svg.append(rect)'"
+    "execute-code code='circle = inkex.Circle(); circle.set(\"cx\", \"150\"); circle.set(\"cy\", \"100\"); circle.set(\"r\", \"20\"); svg.append(circle)'"
 
     Single-line code (use semicolons for multiple statements):
-    ✅ CORRECT: "execute-code code='order=[\"el1\",\"el2\"]; for oid in order: el=svg.getElementById(oid); if el: parent=el.getparent(); parent.remove(el); svg.append(el)'"
+    "execute-code code='order=[\"el1\",\"el2\"]; for oid in order: el=svg.getElementById(oid); if el: parent=el.getparent(); parent.remove(el); svg.append(el)'"
 
     Multiline code (MUST be properly quoted with single quotes):
-    ✅ CORRECT: "execute-code code='for i in range(3):\n    circle = inkex.Circle()\n    circle.set(\"cx\", str(i*50+100))\n    circle.set(\"cy\", \"100\")\n    circle.set(\"r\", \"20\")\n    svg.append(circle)'"
+    "execute-code code='for i in range(3):\n    circle = inkex.Circle()\n    circle.set(\"cx\", str(i*50+100))\n    circle.set(\"cy\", \"100\")\n    circle.set(\"r\", \"20\")\n    svg.append(circle)'"
 
     Element reordering pattern:
-    ✅ CORRECT: "execute-code code='el=svg.getElementById(\"my_element\"); if el: parent=el.getparent(); parent.remove(el); svg.append(el)'"
+    "execute-code code='el=svg.getElementById(\"my_element\"); if el: parent=el.getparent(); parent.remove(el); svg.append(el)'"
 
     Element modification patterns:
-    ✅ CORRECT: "execute-code code='el=svg.getElementById(\"house_body\"); el.set(\"fill\", \"brown\") if el else None'"
-
-    ❌ WRONG: "execute-code code='self.svg.append(...)'" - Use 'svg' not 'self.svg'!
-    ❌ WRONG: "execute-code code='rect = inkex.Rectangle(x=100, y=100)'" - Constructor args don't work!
-    ❌ WRONG: "execute-code code='circle = inkex.Circle(cx=100, cy=100, r=20)'" - Use .set() method!
-    ❌ WRONG: Unquoted multiline code - Always wrap multiline code in single quotes!
+    "execute-code code='el=svg.getElementById(\"house_body\"); el.set(\"fill\", \"brown\") if el else None'"
 
     ═══ INFO & EXPORT OPERATIONS ═══
-    ✅ "get-selection" - Get info about selected objects
-    ✅ "get-info" - Get document information
-    ✅ "export-document-image format=png return_base64=true" - Screenshot
+    "get-selection" - Get info about selected objects
+    "get-info" - Get document information
+    "export-document-image format=png return_base64=true" - Screenshot
 
     ═══ GRADIENTS ═══
-    ✅ "linearGradient stops='[[\"0%\",\"red\"],[\"100%\",\"blue\"]]' x1=0 y1=0 x2=100 y2=100"
-    ✅ "radialGradient cx=100 cy=100 r=200 stops='[[\"0%\",\"green\"],[\"50%\",\"yellow\"],[\"100%\",\"red\"]]'"
+    "linearGradient stops='[[\"0%\",\"red\"],[\"100%\",\"blue\"]]' x1=0 y1=0 x2=100 y2=100"
+    "radialGradient cx=100 cy=100 r=200 stops='[[\"0%\",\"green\"],[\"50%\",\"yellow\"],[\"100%\",\"red\"]]'"
 
     ═══ ID MANAGEMENT ═══
     ALWAYS specify id for every element - this enables later modification and scene management:
@@ -335,20 +334,15 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
     - Returns: {"id_mapping": {"scene": "scene", "house": "house", "sun": "sun"}}
     - Collision handling: If "house" exists, creates "house_1" and returns {"house": "house_1"}
 
-    Benefits of using IDs:
-    - Direct access: svg.getElementById("house") in later execute-code commands
-    - Scene management: Modify specific elements by ID
-    - Clear organization: Hierarchical naming (house_body, house_roof, etc.)
-
-    ═══ SEMANTIC SCENE ORGANIZATION ═══
-    When creating complex scenes, use hierarchical grouping with descriptive IDs:
+    ═══ SEMANTIC ORGANIZATION ═══
+    Use hierarchical grouping with descriptive IDs whenever possible:
 
     Example - Creating a park scene with tree:
-    ✅ "g id=park_scene children=[{g id=tree1 children=[{rect id=trunk1 x=100 y=200 width=20 height=60 fill=brown}, {circle id=foliage1_1 cx=110 cy=180 r=25 fill=green}, {circle id=foliage1_2 cx=105 cy=175 r=20 fill=darkgreen}]}, {g id=house children=[{rect id=house_body x=200 y=180 width=80 height=60 fill=beige}, {polygon id=house_roof points='195,180 240,150 285,180' fill=red}]}]"
+    "g id=park_scene children=[{g id=tree1 children=[{rect id=trunk1 x=100 y=200 width=20 height=60 fill=brown}, {circle id=foliage1_1 cx=110 cy=180 r=25 fill=green}, {circle id=foliage1_2 cx=105 cy=175 r=20 fill=darkgreen}]}, {g id=house children=[{rect id=house_body x=200 y=180 width=80 height=60 fill=beige}, {polygon id=house_roof points='195,180 240,150 285,180' fill=red}]}]"
 
     ID Naming Examples:
-    - Scene: id=park_scene, id=city_view, id=landscape
-    - Objects: id=tree1, id=tree2, id=house, id=car1
+    - Scene Group: id=park_scene, id=city_view, id=landscape
+    - Object Groups: id=tree1, id=tree2, id=house, id=car1
     - Parts: id=trunk1, id=house_body, id=car1_wheel_left
     - Sub-parts: id=foliage1_1, id=foliage1_2, id=house_window1
 
@@ -357,8 +351,8 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
     - Move entire tree: execute-code code="svg.getElementById('tree1').set('transform', 'translate(50,0)')"
     - Add details: execute-code code="svg.getElementById('house').append(new_window_element)"
 
-    REMEMBER: Space-separated key=value pairs, NOT JSON! Use 'svg' in code, NOT 'self.svg'!
     """
+    response_file = None
     try:
         connection = get_inkscape_connection()
 
@@ -399,11 +393,11 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
         return f"❌ Operation failed: {str(e)}"
     finally:
         # Clean up response file if it exists
-        try:
-            if "response_file" in locals() and os.path.exists(response_file):
+        if response_file and os.path.exists(response_file):
+            try:
                 os.remove(response_file)
-        except:
-            pass
+            except:
+                pass
 
 
 def main():
