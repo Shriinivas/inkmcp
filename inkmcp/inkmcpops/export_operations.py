@@ -5,11 +5,11 @@ import base64
 import os
 from typing import Dict, Any
 from inkex.command import call
-from common import create_success_response, create_error_response
+from .common import create_success_response, create_error_response
 
 
 def export_document_image(extension_instance, svg, attributes: Dict[str, Any]) -> Dict[str, Any]:
-    """Export document as image (like Blender viewport screenshot)"""
+    """Export document as image"""
     try:
         # Get export parameters
         format_type = attributes.get('format', 'png')

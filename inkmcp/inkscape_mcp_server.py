@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 Inkscape MCP Server
-A Model Context Protocol server for controlling Inkscape via D-Bus
+Model Context Protocol server for controlling Inkscape via D-Bus extension
 
-Provides natural language access to Inkscape drawing operations using our
-proven D-Bus + JSON parameter system with modular operation architecture.
+Provides access to Inkscape operations through a unified tool interface
+for SVG element creation, document manipulation, and code execution.
 """
 
 import asyncio
@@ -30,7 +30,7 @@ logger = logging.getLogger("InkscapeMCP")
 DEFAULT_DBUS_SERVICE = "org.inkscape.Inkscape"
 DEFAULT_DBUS_PATH = "/org/inkscape/Inkscape"
 DEFAULT_DBUS_INTERFACE = "org.gtk.Actions"
-DEFAULT_ACTION_NAME = "org.mcp.inkscape.draw.modular"
+DEFAULT_ACTION_NAME = "org.khema.inkscape.mcp"
 
 
 class InkscapeConnection:
@@ -41,7 +41,7 @@ class InkscapeConnection:
         self.dbus_path = DEFAULT_DBUS_PATH
         self.dbus_interface = DEFAULT_DBUS_INTERFACE
         self.action_name = DEFAULT_ACTION_NAME
-        self._cli_client_path = Path(__file__).parent / "inkmcpcli.py"
+        self._client_path = Path(__file__).parent / "inkmcpcli.py"
 
     def is_available(self) -> bool:
         """Check if Inkscape is running and MCP extension is available"""
@@ -63,7 +63,7 @@ class InkscapeConnection:
                 logger.warning("Inkscape D-Bus service not available")
                 return False
 
-            # Check if our MCP extension action is listed
+            # Check if our generic MCP extension action is listed
             output = result.stdout
             return self.action_name in output
 
@@ -71,29 +71,64 @@ class InkscapeConnection:
             logger.error(f"Error checking Inkscape availability: {e}")
             return False
 
-    def execute_cli_command(self, command: str) -> Dict[str, Any]:
-        """Execute command using our CLI client"""
+    def execute_operation(self, operation_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute operation using CLI client"""
         try:
-            cmd = ["python", str(self._cli_client_path), "--parse-out", command]
+            # Write operation data to temporary file
+            params_file = os.path.join(tempfile.gettempdir(), "mcp_params.json")
+
+            with open(params_file, "w") as f:
+                json.dump(operation_data, f)
+
+            # Execute via D-Bus
+            cmd = [
+                "gdbus",
+                "call",
+                "--session",
+                "--dest",
+                self.dbus_service,
+                "--object-path",
+                self.dbus_path,
+                "--method",
+                f"{self.dbus_interface}.Activate",
+                self.action_name,
+                "[]",
+                "{}",
+            ]
+
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
             if result.returncode != 0:
-                logger.error(f"CLI command failed: {result.stderr}")
-                return {"success": False, "error": f"Command failed: {result.stderr}"}
+                logger.error(f"D-Bus command failed: {result.stderr}")
+                return {
+                    "status": "error",
+                    "data": {"error": f"D-Bus call failed: {result.stderr}"},
+                }
 
-            # Parse JSON response from CLI
-            response_data = json.loads(result.stdout)
-            return {"success": True, "data": response_data}
+            # Read response from response file
+            response_file = operation_data.get("response_file")
+            if response_file and os.path.exists(response_file):
+                try:
+                    with open(response_file, "r") as f:
+                        response_data = json.load(f)
+                    os.remove(response_file)  # Clean up
+                    return response_data
+                except Exception as e:
+                    logger.error(f"Failed to read response file: {e}")
+                    return {
+                        "status": "error",
+                        "data": {"error": f"Response file error: {e}"},
+                    }
+            else:
+                # Assume success if no response file specified
+                return {"status": "success", "data": {"message": "Operation completed"}}
 
         except subprocess.TimeoutExpired:
-            logger.error("CLI command timed out")
-            return {"success": False, "error": "Command timed out"}
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON response: {e}")
-            return {"success": False, "error": f"Invalid response format: {e}"}
+            logger.error("Operation timed out")
+            return {"status": "error", "data": {"error": "Operation timed out"}}
         except Exception as e:
-            logger.error(f"CLI execution error: {e}")
-            return {"success": False, "error": str(e)}
+            logger.error(f"Operation execution error: {e}")
+            return {"status": "error", "data": {"error": str(e)}}
 
 
 # Global connection instance
@@ -109,8 +144,8 @@ def get_inkscape_connection() -> InkscapeConnection:
 
     if not _inkscape_connection.is_available():
         raise Exception(
-            "Inkscape is not running or MCP extension is not available. "
-            "Please start Inkscape and ensure the modular MCP extension is installed."
+            "Inkscape is not running or generic MCP extension is not available. "
+            "Please start Inkscape and ensure the generic MCP extension is installed."
         )
 
     return _inkscape_connection
@@ -119,7 +154,7 @@ def get_inkscape_connection() -> InkscapeConnection:
 @asynccontextmanager
 async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
     """Manage server startup and shutdown lifecycle"""
-    logger.info("InkscapeMCP server starting up")
+    logger.info("Inkscape MCP server starting up")
 
     try:
         # Test connection on startup
@@ -129,731 +164,245 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
         except Exception as e:
             logger.warning(f"Could not connect to Inkscape on startup: {e}")
             logger.warning(
-                "Make sure Inkscape is running with the MCP extension before using tools"
+                "Make sure Inkscape is running with the generic MCP extension before using tools"
             )
 
         yield {}
     finally:
-        logger.info("InkscapeMCP server shut down")
+        logger.info("Inkscape MCP server shut down")
 
 
 # Create the MCP server
 mcp = FastMCP("InkscapeMCP", lifespan=server_lifespan)
 
-# MCP Tools
 
+def format_response(result: Dict[str, Any]) -> str:
+    """Format operation result for clean AI client display"""
+    if result.get("status") == "success":
+        data = result.get("data", {})
+        message = data.get("message", "Operation completed successfully")
 
-@mcp.tool()
-def draw_shape(ctx: Context, shape_type: str, **params) -> str:
-    """
-    Draw a single shape in Inkscape with specified parameters. Preferred for basic shape creation.
+        # Add relevant details based on operation type
+        details = []
 
-    Parameters:
-    - shape_type: Type of shape (rectangle, circle, ellipse, line, polygon, polyline, text, path)
+        # Element creation details
+        if "id" in data:
+            details.append(f"**ID**: `{data['id']}`")
+        if "tag" in data:
+            details.append(f"**Type**: {data['tag']}")
 
-    Shape parameters (provide as separate keyword arguments):
-    - Rectangle: x, y, width, height
-    - Circle: cx, cy, r
-    - Ellipse: cx, cy, rx, ry
-    - Line: x1, y1, x2, y2
-    - Text: x, y, text_content
-    - Styling: fill, stroke, stroke_width, opacity
+        # Selection/info details
+        if "count" in data:
+            details.append(f"**Count**: {data['count']}")
+        if "elements" in data:
+            elements = data["elements"]
+            if elements:
+                details.append(f"**Elements**: {len(elements)} items")
+                # Show first few elements
+                for i, elem in enumerate(elements[:3]):
+                    elem_desc = (
+                        f"{elem.get('tag', 'unknown')} ({elem.get('id', 'no-id')})"
+                    )
+                    details.append(f"  {i + 1}. {elem_desc}")
+                if len(elements) > 3:
+                    details.append(f"  ... and {len(elements) - 3} more")
 
-    Returns element ID for further reference. For gradient fills, use create_gradient() first.
+        # Export details
+        if "export_path" in data:
+            details.append(f"**File**: {data['export_path']}")
+        if "file_size" in data:
+            details.append(f"**Size**: {data['file_size']} bytes")
 
-    Examples:
-    - draw_shape(shape_type="rectangle", x=100, y=50, width=200, height=100)
-    - draw_shape(shape_type="circle", cx=150, cy=150, r=75, fill="blue")
-    - draw_shape(shape_type="line", x1=0, y1=0, x2=100, y2=100, stroke="red")
-    """
-    try:
-        connection = get_inkscape_connection()
-
-        # Handle different parameter formats from AI clients
-        # TODO: Extract this to common function when server architecture allows operations_common import
-        if len(params) == 1 and "params" in params:
-            # AI client passes a single 'params' string argument
-            param_str = params["params"]
-        else:
-            # Direct keyword arguments (testing/manual use)
-            param_pairs = [f"{k}={v}" for k, v in params.items()]
-            param_str = " ".join(param_pairs)
-
-        command = f"{shape_type} {param_str}".strip()
-
-        logger.info(f"Executing: {command}")
-        result = connection.execute_cli_command(command)
-
-        if not result["success"]:
-            return f"Error drawing {shape_type}: {result['error']}"
-
-        # Extract meaningful response from CLI data
-        cli_data = result["data"]
-        if cli_data.get("total_commands", 0) > 0:
-            cmd_result = cli_data["results"][0]["result"]
-            if cmd_result.get("status") == "success":
-                data = cmd_result.get("data", {})
-                message = data.get(
-                    "message", f"{shape_type.title()} created successfully"
-                )
-                return f"✅ {message}"
+        # Code execution details
+        if "execution_successful" in data:
+            if data["execution_successful"]:
+                details.append("**Execution**: ✅ Success")
             else:
-                error = cmd_result.get("data", {}).get("error", "Unknown error")
-                return f"❌ {error}"
+                details.append("**Execution**: ❌ Failed")
+        if "elements_created" in data and data["elements_created"]:
+            details.append(f"**Created**: {len(data['elements_created'])} elements")
 
-        return f"✅ {shape_type.title()} created successfully"
+        # ID mapping (requested → actual)
+        if "id_mapping" in data and data["id_mapping"]:
+            details.append("**Element IDs** (requested → actual):")
+            for requested_id, actual_id in data["id_mapping"].items():
+                if requested_id == actual_id:
+                    details.append(f"  {requested_id} ✓")
+                else:
+                    details.append(
+                        f"  {requested_id} → {actual_id} (collision resolved)"
+                    )
 
-    except Exception as e:
-        logger.error(f"Error in draw_shape: {e}")
-        return f"❌ Failed to draw {shape_type}: {str(e)}"
-
-
-@mcp.tool()
-def get_selection_info(ctx: Context) -> str:
-    """
-    Get detailed information about currently selected objects in Inkscape.
-
-    Returns information about selected elements including IDs, types,
-    attributes, and bounding boxes.
-    """
-    try:
-        connection = get_inkscape_connection()
-
-        result = connection.execute_cli_command("get-selection")
-
-        if not result["success"]:
-            return f"❌ Error getting selection info: {result['error']}"
-
-        # Parse selection data
-        cli_data = result["data"]
-        if cli_data.get("total_commands", 0) > 0:
-            cmd_result = cli_data["results"][0]["result"]
-            if cmd_result.get("status") == "success":
-                selection_data = cmd_result.get("data", {}).get("selection", {})
-                count = selection_data.get("count", 0)
-                elements = selection_data.get("elements", [])
-
-                if count == 0:
-                    return "ℹ️ No objects are currently selected"
-
-                response = f"📋 Selection Info: {count} object(s) selected\n\n"
-
-                for i, element in enumerate(elements, 1):
-                    elem_type = element.get("tag", "unknown")
-                    elem_id = element.get("id", "no-id")
-
-                    response += f"{i}. **{elem_type.title()}** (ID: {elem_id})\n"
-
-                    # Add bounding box info if available
-                    bbox = element.get("bbox")
-                    if bbox:
-                        response += f"   Position: ({bbox['x']:.1f}, {bbox['y']:.1f})\n"
-                        response += (
-                            f"   Size: {bbox['width']:.1f} × {bbox['height']:.1f}\n"
-                        )
-
-                    # Add key attributes
-                    attrs = element.get("attributes", {})
-                    key_attrs = [
-                        "fill",
-                        "stroke",
-                        "stroke-width",
-                        "width",
-                        "height",
-                        "cx",
-                        "cy",
-                        "r",
-                    ]
-                    shown_attrs = {k: v for k, v in attrs.items() if k in key_attrs}
-                    if shown_attrs:
-                        attr_str = ", ".join(
-                            [f"{k}: {v}" for k, v in shown_attrs.items()]
-                        )
-                        response += f"   Attributes: {attr_str}\n"
-
-                    response += "\n"
-
-                return response
-
-        return "❌ Failed to get selection information"
-
-    except Exception as e:
-        logger.error(f"Error in get_selection_info: {e}")
-        return f"❌ Failed to get selection info: {str(e)}"
-
-
-@mcp.tool()
-def get_document_info(ctx: Context) -> str:
-    """
-    Get information about the current Inkscape document.
-
-    Returns document dimensions, viewBox, and element counts.
-    """
-    try:
-        connection = get_inkscape_connection()
-
-        result = connection.execute_cli_command("get-info")
-
-        if not result["success"]:
-            return f"❌ Error getting document info: {result['error']}"
-
-        # Parse document data
-        cli_data = result["data"]
-        if cli_data.get("total_commands", 0) > 0:
-            cmd_result = cli_data["results"][0]["result"]
-            if cmd_result.get("status") == "success":
-                doc_data = cmd_result.get("data", {}).get("document", {})
-
-                width = doc_data.get("width", "unknown")
-                height = doc_data.get("height", "unknown")
-                viewbox = doc_data.get("viewBox", "none")
-                elements = doc_data.get("element_counts", {})
-
-                response = "📄 **Document Information**\n\n"
-                response += f"**Dimensions**: {width} × {height}\n"
-                response += f"**ViewBox**: {viewbox}\n\n"
-
-                if elements:
-                    response += "**Elements in document**:\n"
-                    for elem_type, count in elements.items():
-                        if elem_type not in [
-                            "svg",
-                            "namedview",
-                            "defs",
-                        ]:  # Skip meta elements
-                            response += f"- {elem_type}: {count}\n"
-
-                return response
-
-        return "❌ Failed to get document information"
-
-    except Exception as e:
-        logger.error(f"Error in get_document_info: {e}")
-        return f"❌ Failed to get document info: {str(e)}"
-
-
-@mcp.tool()
-def batch_draw(ctx: Context, commands: List[str]) -> str:
-    """
-    Execute multiple drawing commands in batch.
-
-    Parameters:
-    - commands: List of drawing command strings
-
-    Example:
-    batch_draw([
-        "rectangle x=50 y=50 width=100 height=100 fill=red",
-        "circle cx=200 cy=200 r=50 fill=blue",
-        "text x=100 y=300 text_content='Batch Drawing!' font_size=16"
-    ])
-    """
-    try:
-        connection = get_inkscape_connection()
-
-        # Join commands with semicolons for batch processing
-        batch_command = "; ".join(commands)
-
-        logger.info(f"Executing batch: {batch_command}")
-        result = connection.execute_cli_command(batch_command)
-
-        if not result["success"]:
-            return f"❌ Batch drawing failed: {result['error']}"
-
-        # Parse batch results
-        cli_data = result["data"]
-        total_commands = cli_data.get("total_commands", 0)
-        results = cli_data.get("results", [])
-
-        successful = 0
-        failed = 0
-        errors = []
-
-        for cmd_result in results:
-            if cmd_result.get("result", {}).get("status") == "success":
-                successful += 1
-            else:
-                failed += 1
-                error_msg = (
-                    cmd_result.get("result", {})
-                    .get("data", {})
-                    .get("error", "Unknown error")
-                )
-                errors.append(error_msg)
-
-        response = f"📦 **Batch Drawing Complete**\n\n"
-        response += f"✅ Successful: {successful}/{total_commands}\n"
-
-        if failed > 0:
-            response += f"❌ Failed: {failed}\n\n"
-            response += "**Errors**:\n"
-            for i, error in enumerate(errors, 1):
-                response += f"{i}. {error}\n"
-
-        return response
-
-    except Exception as e:
-        logger.error(f"Error in batch_draw: {e}")
-        return f"❌ Batch drawing failed: {str(e)}"
-
-
-@mcp.tool()
-def get_object_info(
-    ctx: Context,
-    object_id: str = "",
-    object_name: str = "",
-    object_type: str = "",
-    index: int = 0,
-) -> str:
-    """
-    Get detailed information about a specific object by ID, name/label, or type+index.
-
-    Parameters:
-    - object_id: SVG element ID (e.g., "rect123")
-    - object_name: Inkscape label/name of the object
-    - object_type: Element type (rect, circle, ellipse, etc.) with index
-    - index: Which object of the specified type (0-based, used with object_type)
-
-    Examples:
-    - get_object_info(object_id="rect123")
-    - get_object_info(object_name="My Rectangle")
-    - get_object_info(object_type="circle", index=1)  # Second circle in document
-    """
-    try:
-        connection = get_inkscape_connection()
-
-        # Build command parameters
-        params = []
-        if object_id:
-            params.append(f"object_id={object_id}")
-        elif object_name:
-            params.append(f"object_name='{object_name}'")
-        elif object_type:
-            params.append(f"object_type={object_type}")
-            params.append(f"index={index}")
-        else:
-            return (
-                "❌ Error: Must specify either object_id, object_name, or object_type"
+        # Warning for missing IDs
+        if "generated_ids" in data and data["generated_ids"]:
+            details.append("⚠️  **WARNING: Elements created without IDs**")
+            details.append(
+                "For better scene management, always specify 'id' for elements:"
+            )
+            for gen_id in data["generated_ids"]:
+                # Extract element type from generated ID (e.g., "circle2863" → "circle")
+                elem_type = "".join(c for c in gen_id if c.isalpha())
+                details.append(f"  {gen_id} (use: {elem_type} id=my_name ...)")
+            details.append(
+                "This enables later modification with execute-code commands."
             )
 
-        param_str = " ".join(params)
-        command = f"get-object-info {param_str}"
-        logger.info(f"Executing: {command}")
-        result = connection.execute_cli_command(command)
+        # Build final response with appropriate emoji
+        # Check if this is a failed code execution
+        is_code_failure = (
+            "execution_successful" in data and
+            data["execution_successful"] == False
+        )
 
-        if not result["success"]:
-            return f"❌ Error getting object info: {result['error']}"
+        emoji = "❌" if is_code_failure else "✅"
 
-        # Extract and format response
-        cli_data = result["data"]
-        if cli_data.get("total_commands", 0) > 0:
-            cmd_result = cli_data["results"][0]["result"]
-            if cmd_result.get("status") == "success":
-                data = cmd_result.get("data", {})
-
-                element = data.get("element", {})
-                properties = data.get("properties", {})
-                style = data.get("style", {})
-                search_info = data.get("search_info", {})
-
-                response_parts = [
-                    f"🔍 **Object Information**",
-                    f"**Search**: {search_info.get('search_method', 'unknown')} = {search_info.get('search_value', 'N/A')}",
-                    "",
-                    f"**Element**: {element.get('tag', 'unknown')} (ID: {element.get('id', 'no-id')})",
-                ]
-
-                if element.get("label"):
-                    response_parts.append(f"**Label**: {element['label']}")
-
-                if properties:
-                    response_parts.append("**Properties**:")
-                    for key, value in properties.items():
-                        if value is not None:
-                            response_parts.append(f"- {key}: {value}")
-
-                if style:
-                    response_parts.append("**Style**:")
-                    for key, value in style.items():
-                        response_parts.append(f"- {key}: {value}")
-
-                return "\n".join(response_parts)
-            else:
-                error = cmd_result.get("data", {}).get("error", "Unknown error")
-                return f"❌ {error}"
-
-        return "❌ No response received"
-
-    except Exception as e:
-        logger.error(f"Error in get_object_info: {e}")
-        return f"❌ Error getting object info: {e}"
-
-
-@mcp.tool()
-def get_object_property(
-    ctx: Context,
-    property: str,
-    object_id: str = "",
-    object_name: str = "",
-    object_type: str = "",
-    index: int = 0,
-    use_selection: bool = False,
-) -> str:
-    """
-    Get specific property values from objects.
-
-    Parameters:
-    - property: Property name (width, height, cx, cy, r, fill, stroke, etc.)
-    - object_id: Target specific object by ID
-    - object_name: Target object by Inkscape label/name
-    - object_type: Target object by type (with index)
-    - index: Which object of the type (0-based, used with object_type)
-    - use_selection: Use currently selected objects instead of specified target
-
-    Examples:
-    - get_object_property("width", object_id="rect123")
-    - get_object_property("r", object_type="circle", index=0)  # First circle's radius
-    - get_object_property("fill", use_selection=True)  # Fill color of selected objects
-    """
-    try:
-        connection = get_inkscape_connection()
-
-        # Build command parameters
-        params = [f"property={property}"]
-
-        if use_selection:
-            params.append("use_selection=true")
-        elif object_id:
-            params.append(f"object_id={object_id}")
-        elif object_name:
-            params.append(f"object_name='{object_name}'")
-        elif object_type:
-            params.append(f"object_type={object_type}")
-            params.append(f"index={index}")
+        if details:
+            return f"{emoji} {message}\n\n" + "\n".join(details)
         else:
-            return "❌ Error: Must specify target (object_id, object_name, object_type, or use_selection=True)"
+            return f"{emoji} {message}"
 
-        param_str = " ".join(params)
-        command = f"get-object-property {param_str}"
-        logger.info(f"Executing: {command}")
-        result = connection.execute_cli_command(command)
-
-        if not result["success"]:
-            return f"❌ Error getting property: {result['error']}"
-
-        # Extract and format response
-        cli_data = result["data"]
-        if cli_data.get("total_commands", 0) > 0:
-            cmd_result = cli_data["results"][0]["result"]
-            if cmd_result.get("status") == "success":
-                data = cmd_result.get("data", {})
-
-                search_info = data.get("search_info", {})
-                results = data.get("results", [])
-
-                if not results:
-                    return f"❌ No objects found"
-
-                response_parts = [
-                    f"📏 **Property: {property}**",
-                    f"**Search**: {search_info.get('search_method', 'unknown')} = {search_info.get('search_value', 'N/A')}",
-                    f"**Objects found**: {len(results)}",
-                    "",
-                ]
-
-                for i, obj in enumerate(results):
-                    obj_id = obj.get("id", "no-id")
-                    obj_tag = obj.get("tag", "unknown")
-                    obj_label = obj.get("label", "")
-                    prop_value = obj.get("properties", {}).get(property)
-
-                    obj_desc = f"{obj_tag} (ID: {obj_id})"
-                    if obj_label:
-                        obj_desc += f" [{obj_label}]"
-
-                    response_parts.append(f"{i + 1}. **{obj_desc}**")
-                    response_parts.append(f"   {property}: {prop_value}")
-                    response_parts.append("")
-
-                return "\n".join(response_parts)
-            else:
-                error = cmd_result.get("data", {}).get("error", "Unknown error")
-                return f"❌ {error}"
-
-        return "❌ No response received"
-
-    except Exception as e:
-        logger.error(f"Error in get_object_property: {e}")
-        return f"❌ Error getting property: {e}"
+    else:
+        error = result.get("data", {}).get("error", "Unknown error")
+        return f"❌ {error}"
 
 
 @mcp.tool()
-def execute_inkex_code(ctx: Context, code: str, return_output: bool = True) -> str:
+def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
     """
-    Execute arbitrary Python/inkex code in the Inkscape extension context.
+    Execute any Inkscape operation using the extension system.
 
-    ⚠️ WHEN TO USE: Complex operations, algorithms, batch processing, custom element relationships.
-    ✅ PREFER: draw_shape() for shapes, create_gradient() for gradients, other specific tools when available.
+    CRITICAL SYNTAX RULES - READ CAREFULLY:
+    1. Single string parameter with space-separated key=value pairs
+    2. Children use special bracket syntax: children=[{tag attr=val attr=val}, {tag attr=val}]
+    3. NOT JSON objects - use space-separated attributes inside braces
+    4. Use 'svg' variable in execute-code, NOT 'self.svg'
 
-    Parameters:
-    - code: Python code string to execute in the inkex context
-    - return_output: Whether to capture and return stdout/stderr (default: True)
+    Parameter: command (str) - Command string following exact syntax below
 
-    Available variables: svg, self, document (SVG instance), inkex module, math, random, json, re, os
+    ═══ BASIC ELEMENTS ═══
+    MANDATORY: Always specify id for every element to enable later modification:
+    ✅ CORRECT: "rect id=main_rect x=100 y=50 width=200 height=100 fill=blue stroke=black stroke-width=2"
+    ✅ CORRECT: "circle id=logo_circle cx=150 cy=150 r=75 fill=#ff0000"
+    ✅ CORRECT: "text id=title_text x=50 y=100 text='Hello World' font-size=16 fill=black"
 
-    Key syntax patterns:
-    - Elements: element.set('attribute', 'value'); svg.append(element)
-    - Styling: element.set('style', 'fill:red;stroke:blue') or element.set('fill', 'red')
-    - Groups: group = inkex.Group(); group.append(element); svg.append(group)
-    - Transforms: element.set('transform', 'translate(10,20) scale(2)')
-    - Paths: path.set('d', 'M 10,10 L 100,100')
-    - Find/modify: elem = svg.getElementById('id'); elem.set('fill', 'blue') if elem else None
-    - Delete: elem.getparent().remove(elem) if elem else None
-    - IDs: svg.get_unique_id('prefix')
+    ❌ WRONG: "rect x=100 y=50 width=200" - Missing id! Always specify id for element management
+    ❌ WRONG: {"rect": {"x": 100, "y": 50}} - This is JSON, we don't use JSON!
 
-    Use when specific tools cannot achieve the desired complex manipulation.
+    ═══ NESTED ELEMENTS (Groups) ═══
+    Groups with children - ALWAYS specify id for parent and ALL children:
+    ✅ CORRECT: "g id=house children=[{rect id=house_body x=100 y=200 width=200 height=150 fill=#F5DEB3}, {path id=house_roof d='M 90,200 L 200,100 L 310,200 Z' fill=#A52A2A}]"
+
+    ❌ WRONG: "g children=[{rect x=100 y=200}]" - Missing id for group and rect!
+    ❌ WRONG: "g children=[{\"rect\": {\"x\": 100}}]" - Don't use JSON syntax!
+    ❌ WRONG: "g children=[rect x=100 y=200]" - Missing braces around each child!
+
+    ═══ CODE EXECUTION ═══
+    Execute Python code - use 'svg' variable, not 'self.svg':
+    CRITICAL: inkex elements require .set() method with string values, NOT constructor arguments!
+
+    ✅ CORRECT: "execute-code code='rect = inkex.Rectangle(); rect.set(\"x\", \"100\"); rect.set(\"y\", \"100\"); rect.set(\"width\", \"100\"); rect.set(\"height\", \"100\"); rect.set(\"fill\", \"blue\"); svg.append(rect)'"
+    ✅ CORRECT: "execute-code code='circle = inkex.Circle(); circle.set(\"cx\", \"150\"); circle.set(\"cy\", \"100\"); circle.set(\"r\", \"20\"); svg.append(circle)'"
+
+    Single-line code (use semicolons for multiple statements):
+    ✅ CORRECT: "execute-code code='order=[\"el1\",\"el2\"]; for oid in order: el=svg.getElementById(oid); if el: parent=el.getparent(); parent.remove(el); svg.append(el)'"
+
+    Multiline code (MUST be properly quoted with single quotes):
+    ✅ CORRECT: "execute-code code='for i in range(3):\n    circle = inkex.Circle()\n    circle.set(\"cx\", str(i*50+100))\n    circle.set(\"cy\", \"100\")\n    circle.set(\"r\", \"20\")\n    svg.append(circle)'"
+
+    Element reordering pattern:
+    ✅ CORRECT: "execute-code code='el=svg.getElementById(\"my_element\"); if el: parent=el.getparent(); parent.remove(el); svg.append(el)'"
+
+    Element modification patterns:
+    ✅ CORRECT: "execute-code code='el=svg.getElementById(\"house_body\"); el.set(\"fill\", \"brown\") if el else None'"
+
+    ❌ WRONG: "execute-code code='self.svg.append(...)'" - Use 'svg' not 'self.svg'!
+    ❌ WRONG: "execute-code code='rect = inkex.Rectangle(x=100, y=100)'" - Constructor args don't work!
+    ❌ WRONG: "execute-code code='circle = inkex.Circle(cx=100, cy=100, r=20)'" - Use .set() method!
+    ❌ WRONG: Unquoted multiline code - Always wrap multiline code in single quotes!
+
+    ═══ INFO & EXPORT OPERATIONS ═══
+    ✅ "get-selection" - Get info about selected objects
+    ✅ "get-info" - Get document information
+    ✅ "export-document-image format=png return_base64=true" - Screenshot
+
+    ═══ GRADIENTS ═══
+    ✅ "linearGradient stops='[[\"0%\",\"red\"],[\"100%\",\"blue\"]]' x1=0 y1=0 x2=100 y2=100"
+
+    ═══ ID MANAGEMENT ═══
+    ALWAYS specify id for every element - this enables later modification and scene management:
+    - Input: "g id=scene children=[{rect id=house x=0 y=0}, {circle id=sun cx=100 cy=50}]"
+    - Returns: {"id_mapping": {"scene": "scene", "house": "house", "sun": "sun"}}
+    - Collision handling: If "house" exists, creates "house_1" and returns {"house": "house_1"}
+
+    Benefits of using IDs:
+    - Direct access: svg.getElementById("house") in later execute-code commands
+    - Scene management: Modify specific elements by ID
+    - Clear organization: Hierarchical naming (house_body, house_roof, etc.)
+
+    ═══ SEMANTIC SCENE ORGANIZATION ═══
+    When creating complex scenes, use hierarchical grouping with descriptive IDs:
+
+    Example - Creating a park scene with tree:
+    ✅ "g id=park_scene children=[{g id=tree1 children=[{rect id=trunk1 x=100 y=200 width=20 height=60 fill=brown}, {circle id=foliage1_1 cx=110 cy=180 r=25 fill=green}, {circle id=foliage1_2 cx=105 cy=175 r=20 fill=darkgreen}]}, {g id=house children=[{rect id=house_body x=200 y=180 width=80 height=60 fill=beige}, {polygon id=house_roof points='195,180 240,150 285,180' fill=red}]}]"
+
+    ID Naming Examples:
+    - Scene: id=park_scene, id=city_view, id=landscape
+    - Objects: id=tree1, id=tree2, id=house, id=car1
+    - Parts: id=trunk1, id=house_body, id=car1_wheel_left
+    - Sub-parts: id=foliage1_1, id=foliage1_2, id=house_window1
+
+    Later Modification Examples:
+    - Change trunk color: execute-code code="svg.getElementById('trunk1').set('fill', 'darkbrown')"
+    - Move entire tree: execute-code code="svg.getElementById('tree1').set('transform', 'translate(50,0)')"
+    - Add details: execute-code code="svg.getElementById('house').append(new_window_element)"
+
+    REMEMBER: Space-separated key=value pairs, NOT JSON! Use 'svg' in code, NOT 'self.svg'!
     """
     try:
         connection = get_inkscape_connection()
 
-        # Build command for execute-inkex-code operation
-        command_parts = ["execute-inkex-code"]
+        # Create unique response file for this operation
+        response_fd, response_file = tempfile.mkstemp(
+            suffix=".json", prefix="mcp_response_"
+        )
+        os.close(response_fd)
 
-        # Use base64 encoding to safely pass code through shell
-        import base64
+        # Parse the command string using the same logic as our client
+        from refactor.generic_client import parse_command_string
 
-        encoded_code = base64.b64encode(code.encode("utf-8")).decode("ascii")
-        command_parts.append(f"code_base64={encoded_code}")
+        parsed_data = parse_command_string(command)
 
-        if not return_output:
-            command_parts.append("return_output=false")
+        # Add response file to the operation data
+        parsed_data["response_file"] = response_file
 
-        command = " ".join(command_parts)
-        logger.info(f"Executing code: {code[:100]}{'...' if len(code) > 100 else ''}")
-        result = connection.execute_cli_command(command)
+        logger.info(f"Executing command: {command}")
+        logger.debug(f"Parsed data: {parsed_data}")
 
-        if not result["success"]:
-            return f"❌ Code execution failed: {result['error']}"
+        result = connection.execute_operation(parsed_data)
 
-        # Extract and format response
-        cli_data = result["data"]
-        if cli_data.get("total_commands", 0) > 0:
-            cmd_result = cli_data["results"][0]["result"]
-            if cmd_result.get("status") == "success":
-                data = cmd_result.get("data", {})
+        # Handle image export special case
+        if (
+            parsed_data.get("tag") == "export-document-image"
+            and result.get("status") == "success"
+            and "base64_data" in result.get("data", {})
+        ):
+            # Return actual image for viewport screenshot
+            base64_data = result["data"]["base64_data"]
+            return ImageContent(type="image", data=base64_data, mimeType="image/png")
 
-                response_parts = []
-
-                if data.get("execution_successful"):
-                    response_parts.append("✅ **Code executed successfully**")
-                else:
-                    response_parts.append("❌ **Code execution failed**")
-
-                # Show output if any
-                if data.get("output"):
-                    response_parts.append("**Output:**")
-                    response_parts.append(f"```\n{data['output']}\n```")
-
-                # Show return value if any
-                if data.get("return_value"):
-                    response_parts.append(f"**Return value:** {data['return_value']}")
-
-                # Show elements created
-                elements_created = data.get("elements_created", [])
-                if elements_created:
-                    response_parts.append("**Elements created:**")
-                    for element_info in elements_created:
-                        response_parts.append(f"- {element_info}")
-
-                # Show current element counts
-                element_counts = data.get("current_element_counts", {})
-                if element_counts:
-                    response_parts.append("**Current document elements:**")
-                    for tag, count in sorted(element_counts.items()):
-                        if tag not in [
-                            "svg",
-                            "namedview",
-                            "defs",
-                        ]:  # Skip structural elements
-                            response_parts.append(f"- {tag}: {count}")
-
-                # Show errors if any
-                if data.get("errors"):
-                    response_parts.append("**Errors:**")
-                    response_parts.append(f"```\n{data['errors']}\n```")
-
-                return (
-                    "\n".join(response_parts)
-                    if response_parts
-                    else "✅ Code executed successfully"
-                )
-            else:
-                error = cmd_result.get("data", {}).get("error", "Unknown error")
-                return f"❌ {error}"
-
-        return "❌ No response received"
+        # Format and return text response
+        return format_response(result)
 
     except Exception as e:
-        logger.error(f"Error in execute_inkex_code: {e}")
-        return f"❌ Error executing code: {e}"
-
-
-@mcp.tool()
-def get_viewport_screenshot(ctx: Context, max_size: int = 800) -> Union[str, ImageContent]:
-    """
-    Capture a screenshot of the current Inkscape document and return it as a displayable image.
-
-    Parameters:
-    - max_size: Maximum size in pixels for the largest dimension (default: 800)
-
-    Returns the actual screenshot image that can be displayed directly by AI clients.
-    """
-    try:
-        connection = get_inkscape_connection()
-
-        # Export document as PNG with base64 return
-        command = f"export-document-image format=png max_size={max_size} return_base64=true area=page"
-        logger.info(f"Executing screenshot export with max_size={max_size}")
-        result = connection.execute_cli_command(command)
-
-        if not result["success"]:
-            return f"❌ Screenshot export failed: {result['error']}"
-
-        # Extract response data
-        cli_data = result["data"]
-        if cli_data.get("total_commands", 0) > 0:
-            cmd_result = cli_data["results"][0]["result"]
-            if cmd_result.get("status") == "success":
-                data = cmd_result.get("data", {})
-
-                # Check if we got base64 data
-                if "base64_data" in data:
-                    # Return the actual image content that AI clients can display
-                    base64_data = data.get("base64_data", "")
-                    export_path = data.get("export_path", "unknown")
-                    file_size = data.get("file_size", 0)
-
-                    # Create and return the image object directly
-                    return ImageContent(
-                        type="image",
-                        data=base64_data,
-                        mimeType="image/png"
-                    )
-                else:
-                    # Fallback: return file path info
-                    export_path = data.get("export_path", "unknown")
-                    file_size = data.get("file_size", 0)
-                    return f"📸 **Screenshot exported**\n\n**File**: {export_path}\n**Size**: {file_size} bytes\n**DPI**: {data.get('dpi', 96)}"
-
-            else:
-                error = cmd_result.get("data", {}).get("error", "Unknown error")
-                return f"❌ {error}"
-
-        return "❌ No response received"
-
-    except Exception as e:
-        logger.error(f"Error in get_viewport_screenshot: {e}")
-        return f"❌ Error capturing screenshot: {e}"
-
-
-@mcp.tool()
-def create_gradient(
-    ctx: Context,
-    gradient_type: str,
-    stops: str,
-    gradient_units: str = "userSpaceOnUse",
-    **params
-) -> str:
-    """
-    Create a gradient definition (linear or radial) that can be used to fill or stroke SVG elements.
-
-    Parameters:
-    - gradient_type: Either "linear" or "radial"
-    - stops: Gradient color stops as JSON string (e.g. '[["0%","blue"],["100%","red"]]')
-    - gradient_units: Coordinate system, "userSpaceOnUse" (default) or "objectBoundingBox"
-
-    For LINEAR gradients, provide as separate keyword arguments:
-    - x1: Start x coordinate (number)
-    - y1: Start y coordinate (number)
-    - x2: End x coordinate (number)
-    - y2: End y coordinate (number)
-
-    For RADIAL gradients, provide as separate keyword arguments:
-    - cx: Center x coordinate (number)
-    - cy: Center y coordinate (number)
-    - r: Radius (number)
-    - fx: Optional focal point x coordinate (number)
-    - fy: Optional focal point y coordinate (number)
-
-    Additional options as separate keyword arguments:
-    - gradientTransform: Transform attribute (string)
-    - spreadMethod: "pad", "reflect", or "repeat" (string)
-
-    Returns element ID of created gradient for use in fill="url(#gradientId)".
-
-    Examples:
-    - Linear: create_gradient(gradient_type="linear", stops='[["0%","green"],["100%","red"]]', x1=0, y1=0, x2=100, y2=100)
-    - Radial: create_gradient(gradient_type="radial", stops='[["0%","blue"],["100%","red"]]', cx=100, cy=100, r=50)
-
-    IMPORTANT: Pass coordinates as separate keyword arguments, NOT as comma-separated strings.
-    """
-    try:
-        connection = get_inkscape_connection()
-
-        # Validate gradient type
-        if gradient_type not in ["linear", "radial"]:
-            return f"❌ Invalid gradient_type: {gradient_type}. Use 'linear' or 'radial'."
-
-        # Handle different parameter formats from AI clients
-        # TODO: Extract this to common function when server architecture allows operations_common import
-        if len(params) == 1 and "params" in params:
-            # AI client passes a single 'params' string argument
-            param_str = params["params"]
-            # Add stops and gradientUnits to the parameter string
-            param_str += f" stops={stops} gradientUnits={gradient_units}"
-        else:
-            # Direct keyword arguments (testing/manual use)
-            all_params = {"stops": stops, "gradientUnits": gradient_units}
-            all_params.update(params)
-            param_pairs = [f"{k}={v}" for k, v in all_params.items()]
-            param_str = " ".join(param_pairs)
-
-        command = f"{gradient_type}-gradient {param_str}".strip()
-        result = connection.execute_cli_command(command)
-
-        if not result["success"]:
-            return f"❌ Error creating {gradient_type} gradient: {result['error']}"
-
-        # Parse response
-        cli_data = result["data"]
-        if cli_data.get("total_commands", 0) > 0:
-            cmd_result = cli_data["results"][0]["result"]
-            if cmd_result.get("status") == "success":
-                data = cmd_result.get("data", {})
-                gradient_id = data.get("id", "unknown")
-                stops_count = data.get("stops_count", 0)
-                attributes = data.get("attributes", {})
-
-                # Format response based on gradient type using actual created attributes
-                if gradient_type == "radial":
-                    cx = attributes.get("cx", "default")
-                    cy = attributes.get("cy", "default")
-                    r = attributes.get("r", "default")
-                    return f"✅ **Radial gradient created**\n**ID**: `{gradient_id}`\n**Center**: ({cx}, {cy})\n**Radius**: {r}\n**Stops**: {stops_count}\n**Usage**: `fill=\"url(#{gradient_id})\"`"
-                else:  # linear
-                    x1 = attributes.get("x1", "default")
-                    y1 = attributes.get("y1", "default")
-                    x2 = attributes.get("x2", "default")
-                    y2 = attributes.get("y2", "default")
-                    return f"✅ **Linear gradient created**\n**ID**: `{gradient_id}`\n**Start**: ({x1}, {y1})\n**End**: ({x2}, {y2})\n**Stops**: {stops_count}\n**Usage**: `fill=\"url(#{gradient_id})\"`"
-            else:
-                error = cmd_result.get("data", {}).get("error", "Unknown error")
-                return f"❌ {error}"
-
-        return "❌ No response received"
-
-    except Exception as e:
-        logger.error(f"Error in create_gradient: {e}")
-        return f"❌ Error creating {gradient_type} gradient: {e}"
+        logger.error(f"Error in inkscape_operation: {e}")
+        return f"❌ Operation failed: {str(e)}"
+    finally:
+        # Clean up response file if it exists
+        try:
+            if "response_file" in locals() and os.path.exists(response_file):
+                os.remove(response_file)
+        except:
+            pass
 
 
 def main():
@@ -864,3 +413,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -1,38 +1,27 @@
-"""Execute arbitrary Python/inkex code in Inkscape extension context"""
+"""Code execution operations module"""
 
 import sys
 import io
 import traceback
 from contextlib import redirect_stdout, redirect_stderr
+from typing import Dict, Any
+from .common import create_success_response, create_error_response
 
-def execute(svg, params):
-    """
-    Execute arbitrary Python code in the inkex extension context
 
-    Args:
-        svg: inkscape SVG document object (EffectExtension instance)
-        params: dict with keys:
-            - code: Python code string to execute
-            - return_output: whether to capture and return stdout/stderr (default: True)
-
-    Returns:
-        dict: execution result with output, errors, and any return values
-    """
+def execute_code(extension_instance, svg, attributes: Dict[str, Any]) -> Dict[str, Any]:
+    """Execute arbitrary Python/inkex code in extension context"""
     try:
-        code = params.get('code', '')
+        code = attributes.get('code', '')
         if not code.strip():
-            return {
-                "status": "error",
-                "data": {"error": "No code provided"}
-            }
+            return create_error_response("No code provided")
 
-        return_output = params.get('return_output', True)
+        return_output = attributes.get('return_output', True)
 
         # Set up execution context following inkex patterns
         execution_globals = {
             '__builtins__': __builtins__,
             'svg': svg,
-            'self': svg,  # Common pattern in inkex extensions
+            'self': extension_instance,  # Reference to extension instance
             'document': svg,  # Alias for convenience
         }
 
@@ -158,16 +147,13 @@ def execute(svg, params):
         except Exception as e:
             result_data["element_count_error"] = str(e)
 
-        return {
-            "status": "success",
-            "data": result_data
-        }
+        # Determine message based on execution success
+        message = "Code executed successfully" if result_data["execution_successful"] else "Code execution failed"
+
+        return create_success_response(message, **result_data)
 
     except Exception as e:
-        return {
-            "status": "error",
-            "data": {
-                "error": f"Failed to execute code: {str(e)}",
-                "traceback": traceback.format_exc()
-            }
-        }
+        return create_error_response(
+            f"Failed to execute code: {str(e)}",
+            traceback=traceback.format_exc()
+        )

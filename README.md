@@ -6,7 +6,9 @@ A Model Context Protocol (MCP) server that enables live control of Inkscape thro
 
 - 🎯 **Live Instance Control** - Direct manipulation of running Inkscape documents
 - ⚡ **D-Bus Integration** - Real-time communication
-- 📐 **Comprehensive API** - From simple shapes to complex inkex Python code
+- 🚀 **Universal Element Creation** - Create any SVG element with unified syntax
+- 🏗️ **Hierarchical Scene Management** - Semantic organization with automatic ID collision handling
+- 📐 **Python Code Execution** - Run arbitrary inkex code in live context
 - 🖼️ **Screenshot Support** - Visual feedback with viewport capture
 
 ## Platform Support
@@ -117,22 +119,20 @@ command = "/home/USERNAME/.config/inkscape/extensions/inkmcp/run_inkscape_mcp.sh
 
 ## Available MCP Tools
 
-1. **draw_shape** - Create geometric shapes (rectangle, circle, ellipse, line, polygon, text, path)
-2. **create_gradient** - Create linear and radial gradients for fills and strokes
-3. **get_selection_info** - Get details about currently selected objects
-4. **get_document_info** - Document dimensions, viewBox, element counts
-5. **get_object_info** - Detailed object information by ID/name/type
-6. **get_object_property** - Get specific properties from objects
-7. **execute_inkex_code** - Run arbitrary Python/inkex code in live context
-8. **batch_draw** - Execute multiple drawing commands efficiently
-9. **get_viewport_screenshot** - Capture current view as PNG
+**inkscape_operation** - Universal tool for all Inkscape operations:
+- Create any SVG element (circle, rect, text, path, gradient, etc.)
+- Execute Python/inkex code in live context
+- Get document/selection information
+- Export viewport screenshots
+- Hierarchical element creation with groups
+- Automatic ID collision handling
 
 ## Technical Details
 
 ### Architecture
 - **Extension**: `inkscape_mcp.py` - Inkscape extension triggered via D-Bus
-- **MCP Server**: `inkscape_mcp_server.py` - FastMCP 2.0 based server
-- **CLI Client**: `inkmcpcli.py` - Direct command-line interface
+- **MCP Server**: `inkscape_mcp_server.py` - FastMCP server handling AI requests
+- **CLI Client**: `inkmcpcli.py` - Direct command-line interface for testing
 - **Operations**: `inkmcpops/` - Modular operation handlers
 
 ### Communication Flow
@@ -147,18 +147,23 @@ AI Assistant → MCP Server → CLI Client → D-Bus → Inkscape Extension → 
 # In the inkmcp directory - bypasses AI assistant for direct control
 
 # Basic shapes
-./inkmcpcli.py "circle cx=100 cy=100 r=50 fill=red"
-./inkmcpcli.py "rectangle x=0 y=0 width=200 height=100 stroke=blue"
+python inkmcpcli.py circle "cx=100 cy=100 r=50 fill=red"
+python inkmcpcli.py rect "x=0 y=0 width=200 height=100 stroke=blue"
 
-# Gradients (returns gradient ID for use in fills)
-./inkmcpcli.py "radial-gradient cx=100 cy=100 r=50 stops='[[\"0%\",\"blue\"],[\"100%\",\"red\"]]'"
-./inkmcpcli.py "linear-gradient x1=0 y1=0 x2=200 y2=200 stops='[[\"0%\",\"green\"],[\"50%\",\"yellow\"],[\"100%\",\"red\"]]'"
+# Gradients
+python inkmcpcli.py linearGradient "x1=0 y1=0 x2=200 y2=200 stops='[[\"0%\",\"green\"],[\"50%\",\"yellow\"],[\"100%\",\"red\"]]'"
 
-# Using gradients in shapes
-./inkmcpcli.py "circle cx=100 cy=100 r=75 fill='url(#radialGradient1)'"
+# Code execution
+python inkmcpcli.py execute-code "code='circle = inkex.Circle(); circle.set(\"cx\", \"150\"); circle.set(\"cy\", \"100\"); circle.set(\"r\", \"25\"); svg.append(circle)'"
 
-# Complex code execution
-./inkmcpcli.py "execute-inkex-code code='circle = Circle(); circle.set(\"cx\", \"150\"); svg.append(circle)'"
+# Document info
+python inkmcpcli.py get-info
+
+# Selection info
+python inkmcpcli.py get-selection
+
+# Export screenshot
+python inkmcpcli.py export-document-image "format=png max_size=800"
 ```
 
 ### Arbitrary Code Execution
@@ -176,10 +181,6 @@ svg.append(rect)
 '''
 ```
 
-### Batch Operations
-```bash
-./inkmcpcli.py "rectangle x=0 y=0 width=50 height=50; circle cx=100 cy=100 r=30"
-```
 
 ## Troubleshooting
 
@@ -195,8 +196,8 @@ svg.append(rect)
 # Check D-Bus connection
 gdbus introspect --session --dest org.inkscape.Inkscape --object-path /org/inkscape/Inkscape
 
-# Verbose CLI output
-./inkmcpcli.py "get-info" --parse-out --pretty
+# Structured JSON output
+python inkmcpcli.py get-info --parse-out --pretty
 ```
 
 ## Development

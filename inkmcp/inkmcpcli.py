@@ -1,13 +1,67 @@
 #!/usr/bin/env python3
 """
-Inkscape MCP CLI Client
-Command-line interface for controlling Inkscape via D-Bus MCP extension
+Inkscape MCP Client
+Command-line interface for creating any SVG element via D-Bus MCP extension with unified parsing
 
 Usage:
-    python inkmcpcli.py "circle cx=100 cy=200 r=50 fill=#ff0000"
-    python inkmcpcli.py -i commands.txt
-    echo "rect x=0 y=0 width=100 height=100" | python inkmcpcli.py
-    python inkmcpcli.py --parse-out "get-selection"
+    python inkmcpcli.py <tag> '<attributes>'
+
+Attribute Format:
+    - Basic: key=value (e.g., cx=100, fill=red)
+    - Quoted values: key="value with spaces" or key='value with spaces'
+    - Children: children=[{tag 'attr1=val1 attr2=val2'}, {tag 'attr3=val3'}]
+
+Basic Shape Examples:
+    python inkmcpcli.py circle 'cx=100 cy=100 r=50 fill=red'
+    python inkmcpcli.py rect 'x=10 y=10 width=100 height=50 fill=blue'
+    python inkmcpcli.py text 'x=50 y=50 font-size=14 content="Hello World"'
+
+Linear Gradient Examples:
+    # userSpaceOnUse (shows immediately)
+    python inkmcpcli.py linearGradient "x1=0 y1=0 x2=300 y2=0 gradientUnits=userSpaceOnUse children=[{stop 'offset=\"0%\" stop-color=\"purple\"'}, {stop 'offset=\"100%\" stop-color=\"orange\"'}]"
+
+    # objectBoundingBox (may need nudge to refresh)
+    python inkmcpcli.py linearGradient "x1=0 y1=0 x2=1 y2=1 gradientUnits=objectBoundingBox children=[{stop 'offset=\"0%\" stop-color=\"cyan\"'}, {stop 'offset=\"100%\" stop-color=\"magenta\"'}]"
+
+Radial Gradient Examples:
+    # userSpaceOnUse
+    python inkmcpcli.py radialGradient "cx=150 cy=150 r=80 gradientUnits=userSpaceOnUse children=[{stop 'offset=\"0%\" stop-color=\"white\"'}, {stop 'offset=\"100%\" stop-color=\"black\"'}]"
+
+    # objectBoundingBox
+    python inkmcpcli.py radialGradient "cx=0.5 cy=0.5 r=0.7 gradientUnits=objectBoundingBox children=[{stop 'offset=\"0%\" stop-color=\"gold\"'}, {stop 'offset=\"100%\" stop-color=\"darkred\"'}]"
+
+Applying Gradients to Shapes:
+    python inkmcpcli.py circle "cx=100 cy=100 r=50 fill=url(#linearGradient123)"
+    python inkmcpcli.py rect "x=10 y=10 width=100 height=80 fill=url(#radialGradient456)"
+
+Complex Nested Examples:
+    # Group with multiple children
+    python inkmcpcli.py g "id=\"my-group\" children=[{circle 'cx=50 cy=50 r=25 fill=red'}, {rect 'x=0 y=0 width=20 height=20 fill=blue'}]"
+
+Quoting Guidelines:
+    - Use double quotes for outer shell string: "..."
+    - Use single quotes for attribute values inside children: '...'
+    - Escape quotes when needed: 'content=\"Hello World\"'
+    - For spaces in values: 'font-family=\"Arial Black\"'
+
+Info Functions:
+    python inkmcpcli.py get-selection ""
+    python inkmcpcli.py get-info ""
+    python inkmcpcli.py get-info-by-id "id=rect1"
+    python inkmcpcli.py export-document-image "format=png max_size=400 area=page"
+    python inkmcpcli.py execute-code "code='circle = Circle(); circle.set(\"r\", \"50\"); svg.append(circle)'"
+
+Supported Elements:
+    - All standard SVG elements (circle, rect, line, path, text, g, etc.)
+    - Gradient elements (linearGradient, radialGradient with stops)
+    - Info functions (get-selection, get-info, get-info-by-id, export-document-image)
+    - Dynamic class mapping: tag → Capitalized inkex class (e.g., linearGradient → LinearGradient)
+
+Known Issue: objectBoundingBox gradients require manual nudge to refresh visibility in Inkscape UI
+- This is an Inkscape rendering quirk, not a client implementation issue
+- userSpaceOnUse gradients display immediately without refresh issues
+- Workaround: Use userSpaceOnUse coordinate system for immediate visibility
+- TODO: Investigate programmatic fix for objectBoundingBox refresh issue
 """
 
 import argparse
@@ -17,304 +71,528 @@ import tempfile
 import os
 import subprocess
 import re
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 
-class InkscapeMCPClient:
-    """D-Bus client for Inkscape MCP extension"""
+
+def parse_children_array(children_str: str) -> List[Dict[str, Any]]:
+    """
+    Parse children array string like "[{rect 'x=0 y=0'}, {circle 'cx=25 cy=25'}]"
+
+    Args:
+        children_str: String containing children array
+
+    Returns:
+        List of parsed child element dictionaries
+    """
+    if not children_str.strip():
+        return []
+
+    children_str = children_str.strip()
+
+    # Remove outer brackets
+    if children_str.startswith('[') and children_str.endswith(']'):
+        children_str = children_str[1:-1].strip()
+
+    if not children_str:
+        return []
+
+    children = []
+    brace_count = 0
+    current_child = ""
+    i = 0
+
+    while i < len(children_str):
+        char = children_str[i]
+
+        if char == '{':
+            brace_count += 1
+            if brace_count == 1:
+                current_child = ""  # Start new child, don't include opening brace
+                i += 1
+                continue
+
+        elif char == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                # End of current child, parse it
+                if current_child.strip():
+                    child_data = parse_tag_and_attributes(current_child.strip())
+                    if child_data:
+                        children.append(child_data)
+                current_child = ""
+                i += 1
+                continue
+
+        elif char == ',' and brace_count == 0:
+            # Skip commas between top-level children
+            i += 1
+            continue
+
+        if brace_count > 0:
+            current_child += char
+
+        i += 1
+
+    # Handle any remaining child
+    if current_child.strip():
+        child_data = parse_tag_and_attributes(current_child.strip())
+        if child_data:
+            children.append(child_data)
+
+    return children
+
+
+def parse_tag_and_attributes(content: str) -> Dict[str, Any]:
+    """
+    Parse content like "stop 'offset=\"0%\" stop-color=\"blue\"'" into element data
+
+    Args:
+        content: String with tag followed by attributes
+
+    Returns:
+        Element data dictionary or None if parsing fails
+    """
+    content = content.strip()
+    if not content:
+        return None
+
+    # Split into tag and attributes
+    parts = content.split(None, 1)  # Split on first whitespace
+    if not parts:
+        return None
+
+    tag = parts[0]
+    attr_str = parts[1] if len(parts) > 1 else ""
+
+    # Parse attributes using existing logic
+    attributes = parse_attributes(attr_str)
+
+    element_data = {
+        "tag": tag,
+        "attributes": attributes
+    }
+
+    # Handle nested children recursively
+    if 'children' in attributes:
+        children_value = attributes.pop('children')
+        if isinstance(children_value, str):
+            element_data["children"] = parse_children_array(children_value)
+        else:
+            element_data["children"] = children_value
+
+    return element_data
+
+
+def parse_attributes(param_str: str) -> Dict[str, Any]:
+    """
+    Parse parameter string into attributes dictionary
+
+    Args:
+        param_str: Parameter string like "x1=0 y1=0 fill=blue children=[{...}]"
+
+    Returns:
+        Dictionary with parsed attributes
+    """
+    if not param_str.strip():
+        return {}
+
+    attributes = {}
+
+    # Enhanced regex to handle quoted values, arrays, and objects (including multiline)
+    # Pattern explanation:
+    # - (\w+(?:[_-]\w+)*) : key name with optional hyphens/underscores
+    # - = : equals sign
+    # - Group of alternatives for value:
+    #   - "([^"]*)" : double quoted content (group 2)
+    #   - '([^']*)' : single quoted content (group 3)
+    #   - (\[(?:[^\[\]]|\{[^}]*\}|\[[^\]]*\])*\]) : array content (group 4)
+    #   - ([^\s,=]+) : unquoted content (group 5)
+    param_pattern = r'(\w+(?:[_-]\w+)*)=("([^"]*)"|\'([^\']*)\'|(\[(?:[^\[\]]|\{[^}]*\}|\[[^\]]*\])*\])|([^\s,=]+))'
+    raw_matches = re.findall(param_pattern, param_str, re.DOTALL)
+
+    for match in raw_matches:
+        key = match[0]
+        full_value = match[1]
+
+        # Extract the actual value based on quoting type
+        if full_value.startswith('"') and full_value.endswith('"'):
+            value = match[2]  # Double quoted content
+        elif full_value.startswith("'") and full_value.endswith("'"):
+            value = match[3]  # Single quoted content
+        elif full_value.startswith('['):
+            value = match[4]  # Array content (keep as string for later parsing)
+        else:
+            value = match[5]  # Unquoted content
+
+        # Handle special array values
+        if key == 'children' and isinstance(value, str) and value.startswith('['):
+            # Keep as string for later recursive parsing
+            attributes[key] = value
+        elif value.startswith('[') and value.endswith(']'):
+            # Try to parse as JSON array
+            try:
+                attributes[key] = json.loads(value)
+            except json.JSONDecodeError:
+                # Keep as string if JSON parsing fails
+                attributes[key] = value
+        else:
+            attributes[key] = value
+
+    return attributes
+
+
+class InkscapeClient:
+    """D-Bus client for SVG element creation"""
 
     def __init__(self):
         self.dbus_service = "org.inkscape.Inkscape"
         self.dbus_path = "/org/inkscape/Inkscape"
         self.dbus_interface = "org.gtk.Actions"
-        self.action_name = "org.mcp.inkscape.draw.modular"
+        self.action_name = "org.khema.inkscape.mcp"
 
-    def parse_command(self, command_str: str) -> Dict[str, Any]:
-        """Parse command string into parameters dictionary"""
-        command_str = command_str.strip()
-        if not command_str:
-            return {}
 
-        # Split command into parts
-        parts = command_str.split(None, 1)
-        if not parts:
-            return {}
 
-        # First part is the action/shape type
-        action_part = parts[0]
-        params = {}
 
-        # Determine action type
-        if action_part in ['get-selection', 'get-info', 'export-document', 'get-object-info', 'get-object-property', 'export-document-image']:
-            params['action'] = action_part
-        elif action_part == 'execute-inkex-code':
-            params['action'] = 'execute-inkex-code'
-        elif action_part in ['rectangle', 'rect', 'circle', 'ellipse', 'line', 'polygon', 'polyline', 'text', 'path']:
-            params['action'] = 'draw-shape'
-            params['shape_type'] = action_part
-        elif action_part in ['radial-gradient', 'linear-gradient']:
-            params['action'] = 'add-gradient'
-            params['gradient_type'] = action_part
-        else:
-            # Assume it's a custom action
-            params['action'] = action_part
+    def build_element_data(self, tag: str, param_str: str) -> Dict[str, Any]:
+        """
+        Build element data structure from tag and parameters
 
-        # Parse remaining parameters if any
-        if len(parts) > 1:
-            param_str = parts[1]
+        Args:
+            tag: SVG tag name (e.g., 'linearGradient', 'circle')
+            param_str: Parameter string
 
-            # Parse key=value pairs
-            # Handle quoted values and various formats - improved regex for quoted strings and nested arrays
-            param_pattern = r'(\w+(?:[_-]\w+)*)=("([^"]*)"|\'([^\']*)\'|(\[(?:[^\[\]]|\[[^\]]*\])*\])|([^\s,]+))'
-            raw_matches = re.findall(param_pattern, param_str)
+        Returns:
+            Element data dictionary
+        """
+        # Use the unified parsing approach
+        full_content = f"{tag} {param_str}".strip()
+        return parse_tag_and_attributes(full_content)
 
-            # Process matches to extract the actual value from the capture groups
-            matches = []
-            for match in raw_matches:
-                key = match[0]
-                # match[1] is the full value, match[2] is double-quoted, match[3] is single-quoted,
-                # match[4] is bracketed, match[5] is unquoted
-                if match[2]:  # double-quoted
-                    value = match[2]
-                elif match[3]:  # single-quoted
-                    value = match[3]
-                elif match[4]:  # bracketed (arrays)
-                    value = match[4]
-                else:  # unquoted
-                    value = match[5] if match[5] else match[1]
-                matches.append((key, value))
-
-            for key, value in matches:
-                # Unescape common bash escape sequences
-                value = value.replace('\\!', '!').replace('\\$', '$').replace('\\\\', '\\')
-
-                # Try to convert to appropriate type
-                if value.lower() in ['true', 'false']:
-                    params[key] = value.lower() == 'true'
-                elif value.lower() in ['none', 'null']:
-                    params[key] = None
-                elif value.startswith('[') and value.endswith(']'):
-                    # Handle array format like points=[[100,50],[150,100]]
-                    try:
-                        params[key] = json.loads(value)
-                    except:
-                        params[key] = value
-                elif value.replace('.', '').replace('-', '').isdigit():
-                    # Numeric value
-                    if '.' in value:
-                        params[key] = float(value)
-                    else:
-                        params[key] = int(value)
-                else:
-                    params[key] = value
-
-        # Handle base64-encoded code parameter
-        if 'code_base64' in params:
-            import base64
-            try:
-                decoded_code = base64.b64decode(params['code_base64']).decode('utf-8')
-                params['code'] = decoded_code
-                del params['code_base64']  # Remove the base64 version
-            except Exception as e:
-                print(f"Error decoding base64 code: {e}", file=sys.stderr)
-
-        return params
-
-    def execute_command(self, params: Dict[str, Any], parse_response: bool = False) -> Optional[Dict[str, Any]]:
-        """Execute a single command via D-Bus"""
+    def execute_command(self, element_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute command via D-Bus"""
         try:
-            # Create temporary response file for reverse communication
-            response_file = None
-            if parse_response or params.get('action') in ['get-selection', 'get-info', 'export-document', 'execute-inkex-code']:
-                response_file = tempfile.mktemp(suffix='.json', prefix='inkmcp_response_')
-                params['response_file'] = response_file
+            # Create temporary response file for reverse communication (like original system)
+            response_file = tempfile.mktemp(suffix='.json', prefix='inkmcp_response_')
+            element_data['response_file'] = response_file
 
-            # Write parameters to JSON file
+            # Write parameters to fixed JSON file (like original system)
             params_file = os.path.join(tempfile.gettempdir(), "mcp_params.json")
             with open(params_file, 'w') as f:
-                json.dump(params, f)
+                json.dump(element_data, f)
 
-            # Execute D-Bus command
+            # Execute D-Bus command (like original system)
             cmd = [
-                'gdbus', 'call',
-                '--session',
-                '--dest', self.dbus_service,
-                '--object-path', self.dbus_path,
-                '--method', f'{self.dbus_interface}.Activate',
+                "gdbus", "call",
+                "--session",
+                "--dest", self.dbus_service,
+                "--object-path", self.dbus_path,
+                "--method", f"{self.dbus_interface}.Activate",
                 self.action_name,
-                '[]', '{}'
+                "[]", "{}"
             ]
 
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
             if result.returncode != 0:
                 return {
-                    "status": "error",
-                    "data": {"error": f"D-Bus call failed: {result.stderr}"}
+                    "success": False,
+                    "error": f"D-Bus command failed: {result.stderr}"
                 }
 
-            # Read response if available
-            if response_file and os.path.exists(response_file):
+            # Read response from response file (like original system)
+            if os.path.exists(response_file):
                 try:
                     with open(response_file, 'r') as f:
                         response = json.load(f)
                     os.remove(response_file)
-                    return response
+                    return {"success": True, "response": response}
                 except Exception as e:
                     return {
-                        "status": "error",
-                        "data": {"error": f"Failed to read response: {str(e)}"}
+                        "success": False,
+                        "error": f"Failed to read response: {str(e)}"
                     }
 
-            # Default success response
-            return {
-                "status": "success",
-                "data": {"message": "Command executed successfully"}
-            }
+            return {"success": True, "output": result.stdout}
 
+        except subprocess.TimeoutExpired:
+            return {
+                "success": False,
+                "error": "Command timed out after 30 seconds"
+            }
         except Exception as e:
             return {
-                "status": "error",
-                "data": {"error": f"Command execution failed: {str(e)}"}
+                "success": False,
+                "error": f"Execution failed: {str(e)}"
             }
 
-    def process_commands(self, commands: List[str], parse_output: bool = False) -> List[Dict[str, Any]]:
-        """Process multiple commands"""
-        results = []
+    def format_response(self, result: Dict[str, Any]) -> str:
+        """Format the response for display"""
+        if not result.get("success"):
+            return f"❌ Error: {result.get('error', 'Unknown error')}"
 
-        for command_str in commands:
-            command_str = command_str.strip()
-            if not command_str or command_str.startswith('#'):
-                continue
+        # Check if we have a proper response from response file
+        if "response" in result:
+            response_data = result["response"]
+            if response_data.get("status") == "success":
+                data = response_data.get("data", {})
+                element_id = data.get("id", "unknown")
+                message = data.get("message", "Element created successfully")
 
-            params = self.parse_command(command_str)
-            if not params:
-                continue
+                # Format detailed info for info commands
+                status_emoji = "✅" if data.get("execution_successful", True) != False else "❌"
+                result_lines = [f"{status_emoji} {message}"]
+                if element_id != "unknown":
+                    result_lines.append(f"**ID**: `{element_id}`")
 
-            result = self.execute_command(params, parse_output)
-            results.append({
-                "command": command_str,
-                "params": params,
-                "result": result
-            })
+                # Add detailed data for info commands
+                for key, value in data.items():
+                    if key not in ["id", "message"]:
+                        if isinstance(value, dict):
+                            result_lines.append(f"**{key.title()}**: {json.dumps(value, indent=2)}")
+                        elif isinstance(value, list):
+                            result_lines.append(f"**{key.title()}**: {json.dumps(value, indent=2)}")
+                        else:
+                            result_lines.append(f"**{key.title()}**: {value}")
 
-        return results
+                return "\n".join(result_lines)
+            else:
+                error = response_data.get("data", {}).get("error", "Unknown error")
+                return f"❌ Error: {error}"
+
+        # Fallback to raw output parsing
+        try:
+            output = result.get("output", "")
+            # D-Bus returns output in format like "('result_here',)"
+            if output.startswith("('") and output.endswith("',)"):
+                output = output[2:-3]  # Remove D-Bus wrapping
+
+            response_data = json.loads(output)
+
+            if response_data.get("status") == "success":
+                data = response_data.get("data", {})
+                element_id = data.get("id", "unknown")
+                message = data.get("message", "Element created successfully")
+
+                # Format detailed info for info commands (fallback path)
+                status_emoji = "✅" if data.get("execution_successful", True) != False else "❌"
+                result_lines = [f"{status_emoji} {message}"]
+                if element_id != "unknown":
+                    result_lines.append(f"**ID**: `{element_id}`")
+
+                # Add detailed data for info commands
+                for key, value in data.items():
+                    if key not in ["id", "message"]:
+                        if isinstance(value, dict):
+                            result_lines.append(f"**{key.title()}**: {json.dumps(value, indent=2)}")
+                        elif isinstance(value, list):
+                            result_lines.append(f"**{key.title()}**: {json.dumps(value, indent=2)}")
+                        else:
+                            result_lines.append(f"**{key.title()}**: {value}")
+
+                return "\n".join(result_lines)
+            else:
+                error = response_data.get("data", {}).get("error", "Unknown error")
+                return f"❌ Error: {error}"
+
+        except (json.JSONDecodeError, KeyError):
+            # Return raw output if parsing fails
+            return result.get("output", "Command completed")
+
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Inkscape MCP CLI Client - Control Inkscape via D-Bus",
+        description="Inkscape MCP Client",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Draw shapes
-  python inkmcpcli.py "circle cx=100 cy=200 r=50 fill=#ff0000"
-  python inkmcpcli.py "rect x=10 y=10 width=100 height=50 stroke=blue"
-  python inkmcpcli.py "polygon points=[[0,0],[100,0],[50,50]] fill=green"
+  # Create a circle
+  python inkmcpcli.py circle "cx=100 cy=100 r=50 fill=blue"
 
-  # Create gradients
-  python inkmcpcli.py "radial-gradient cx=100 cy=100 r=50 stops='[[\"0%\",\"blue\"],[\"100%\",\"red\"]]'"
-  python inkmcpcli.py "linear-gradient x1=0 y1=0 x2=200 y2=200 stops='[[\"0%\",\"green\"],[\"100%\",\"red\"]]'"
+  # Create a linear gradient with stops
+  python inkmcpcli.py linearGradient "x1=0 y1=0 x2=100 y2=100 children=[{\"tag\":\"stop\",\"attributes\":{\"offset\":\"0%\",\"stop-color\":\"blue\"}},{\"tag\":\"stop\",\"attributes\":{\"offset\":\"100%\",\"stop-color\":\"red\"}}]"
 
-  # Use gradients in shapes
-  python inkmcpcli.py "circle cx=100 cy=100 r=75 fill='url(#radialGradient1)'"
+  # Execute code from string (multiline requires quotes)
+  python inkmcpcli.py execute-code "code='for i in range(3): print(i)'"
 
-  # Get information (with parsed output)
-  python inkmcpcli.py --parse-out "get-selection"
-  python inkmcpcli.py --parse-out "get-info"
+  # Execute code from file (file contains Python code)
+  python inkmcpcli.py execute-code -f my_script.py
 
-  # Batch processing
-  python inkmcpcli.py "rect x=0 y=0 width=50 height=50; circle cx=100 cy=100 r=30"
+  # Execute batch commands from file (file contains multiple command lines)
+  python inkmcpcli.py batch -f batch_commands.txt
 
-  # From file
-  python inkmcpcli.py -i commands.txt
+  # Use file for parameters (file content replaces parameter string)
+  python inkmcpcli.py circle -f circle_params.txt
 
-  # From stdin
-  echo "circle cx=200 cy=200 r=75 fill=yellow" | python inkmcpcli.py
+  # Get selection info
+  python inkmcpcli.py get-selection ""
+
+  # Get document info
+  python inkmcpcli.py get-info ""
         """
     )
 
-    parser.add_argument('commands', nargs='*', help='Command string(s) to execute')
-    parser.add_argument('-i', '--input', help='Read commands from file')
-    parser.add_argument('--parse-out', action='store_true',
-                       help='Parse and return structured JSON response')
-    parser.add_argument('--pretty', action='store_true',
-                       help='Pretty print JSON output')
+    parser.add_argument("tag", help="SVG tag name or info action")
+    parser.add_argument("params", nargs="?", default="", help="Parameters string")
+    parser.add_argument("-f", "--file", help="Read parameters from file")
+    parser.add_argument("--parse-out", action="store_true", help="Parse and return structured JSON response")
+    parser.add_argument("--pretty", action="store_true", help="Pretty print JSON output")
 
     args = parser.parse_args()
 
-    client = InkscapeMCPClient()
-    commands = []
+    client = InkscapeClient()
 
-    # Determine input source
-    if args.input:
-        # Read from file
-        try:
-            with open(args.input, 'r') as f:
-                content = f.read()
-        except Exception as e:
-            print(f"Error reading file {args.input}: {e}", file=sys.stderr)
-            return 1
-    elif args.commands:
-        # From command line arguments
-        content = ' '.join(args.commands)
-    elif not sys.stdin.isatty():
-        # From stdin
-        content = sys.stdin.read()
-    else:
-        parser.print_help()
-        return 1
+    try:
+        # Initialize params
+        params = args.params
 
-    # Split commands by newline or semicolon, but handle execute-inkex-code specially
-    if content.strip().startswith('execute-inkex-code'):
-        # Don't split execute-inkex-code commands - treat the whole thing as one command
-        commands = [content.strip()]
-    else:
-        # Normal splitting for other commands
-        raw_commands = re.split(r'[;\n]', content)
-        commands = [cmd.strip() for cmd in raw_commands if cmd.strip()]
+        # Handle file input
+        if args.file:
+            if not os.path.exists(args.file):
+                print(f"❌ File not found: {args.file}", file=sys.stderr)
+                return 1
 
-    if not commands:
-        print("No commands to execute", file=sys.stderr)
-        return 1
+            with open(args.file, 'r') as f:
+                file_content = f.read().strip()
 
-    # Process commands
-    results = client.process_commands(commands, args.parse_out)
+            if args.tag == "execute-code":
+                # For execute-code, treat file content as Python code
+                if params.strip() and 'code=' in params:
+                    print(f"❌ Cannot use both -f option and code= parameter", file=sys.stderr)
+                    return 1
 
-    # Output results
-    if args.parse_out:
-        # Structured output
-        output = {
-            "total_commands": len(results),
-            "results": results
-        }
-    else:
-        # Simple success/error output
-        output = []
-        for result in results:
-            status = result['result'].get('status', 'unknown')
-            data = result['result'].get('data', {})
+                # Build code parameter from file content
+                if params.strip():
+                    params = f"{params} code='{file_content}'"
+                else:
+                    params = f"code='{file_content}'"
 
-            # Check for execution errors in execute-inkex-code
-            if result['params'].get('action') == 'execute-inkex-code' and not data.get('execution_successful', True):
-                status = 'error'
-                message = data.get('errors', 'Code execution failed')
+                # Build element data and execute single command
+                element_data = client.build_element_data(args.tag, params)
+                result = client.execute_command(element_data)
+            elif args.tag == "batch":
+                # For batch command, treat file as batch of command lines
+                if params.strip():
+                    print(f"❌ Cannot use parameters with batch command", file=sys.stderr)
+                    return 1
+
+                # Process each line as a separate command
+                lines = [line.strip() for line in file_content.split('\n') if line.strip()]
+
+                # Handle batch output
+                if args.parse_out:
+                    # Structured JSON output for batch
+                    batch_results = []
+                    for line_num, line in enumerate(lines, 1):
+                        try:
+                            element_data = parse_tag_and_attributes(line)
+                            if element_data:
+                                result = client.execute_command(element_data)
+                                batch_results.append({
+                                    "line": line_num,
+                                    "command": line,
+                                    "result": result
+                                })
+                            else:
+                                batch_results.append({
+                                    "line": line_num,
+                                    "command": line,
+                                    "result": {"success": False, "error": "Failed to parse command"}
+                                })
+                        except Exception as e:
+                            batch_results.append({
+                                "line": line_num,
+                                "command": line,
+                                "result": {"success": False, "error": str(e)}
+                            })
+
+                    output = {
+                        "total_commands": len(batch_results),
+                        "results": batch_results
+                    }
+
+                    if args.pretty:
+                        print(json.dumps(output, indent=2))
+                    else:
+                        print(json.dumps(output))
+
+                    all_success = all(r["result"].get("success", False) for r in batch_results)
+                    return 0 if all_success else 1
+                else:
+                    # Human-readable output for batch
+                    results = []
+                    for line_num, line in enumerate(lines, 1):
+                        try:
+                            element_data = parse_tag_and_attributes(line)
+                            if element_data:
+                                result = client.execute_command(element_data)
+                                results.append(f"Line {line_num}: {client.format_response(result)}")
+                            else:
+                                results.append(f"Line {line_num}: ❌ Failed to parse command: {line}")
+                        except Exception as e:
+                            results.append(f"Line {line_num}: ❌ Error: {str(e)}")
+
+                    for result_line in results:
+                        print(result_line)
+
+                    # Return success if all commands succeeded
+                    all_success = all("❌" not in result_line for result_line in results)
+                    return 0 if all_success else 1
             else:
-                message = data.get('message', 'No message')
+                # For other commands with -f, file content replaces params
+                if params.strip():
+                    print(f"❌ Cannot use both -f option and parameters", file=sys.stderr)
+                    return 1
+                params = file_content
 
-            output.append({
-                "command": result['command'],
-                "status": status,
-                "message": message
-            })
+        # Single command execution (either no file, or execute-code with file already processed)
+        # Build element data
+        element_data = client.build_element_data(args.tag, params)
 
-    # Print JSON output
-    if args.pretty:
-        print(json.dumps(output, indent=2))
-    else:
-        print(json.dumps(output))
+        # Execute command
+        result = client.execute_command(element_data)
 
-    # Return appropriate exit code
-    errors = [r for r in results if r['result'].get('status') == 'error']
-    return 1 if errors else 0
+        # Format and display response
+        if args.parse_out:
+            # Structured JSON output
+            output = {
+                "command": f"{args.tag} {params}".strip(),
+                "tag": args.tag,
+                "params": params,
+                "result": result
+            }
+        else:
+            # Human-readable format
+            output = client.format_response(result)
 
-if __name__ == '__main__':
+        # Print output
+        if args.parse_out:
+            if args.pretty:
+                print(json.dumps(output, indent=2))
+            else:
+                print(json.dumps(output))
+        else:
+            print(output)
+
+        return 0 if result.get("success") else 1
+
+    except Exception as e:
+        print(f"❌ Client error: {str(e)}", file=sys.stderr)
+        return 1
+
+
+def parse_command_string(command: str) -> Dict[str, Any]:
+    """
+    Standalone function to parse command string for server use
+
+    Args:
+        command: Command string like "rect x=100 y=50 width=200 height=100"
+                or "g map_id=myGroup children=[{rect map_id=r1 x=0 y=0}]"
+
+    Returns:
+        Parsed element data dictionary
+    """
+    return parse_tag_and_attributes(command)
+
+
+if __name__ == "__main__":
     sys.exit(main())

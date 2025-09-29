@@ -1,17 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <inkscape-extension xmlns="http://www.inkscape.org/namespace/inkscape/extension">
-    <name>Inkscape MCP Drawing (D-Bus Modular)</name>
-    <id>org.mcp.inkscape.draw.modular</id>
-    <description>Inkscape MCP extension enabling live control via D-Bus. Designed for use with MCP servers and AI assistants. Cross-platform parameter handling.</description>
+  <name>MCP Extension</name>
+  <id>org.khema.inkscape.mcp</id>
 
-    <!-- No parameters needed - reads from JSON file -->
 
-    <effect>
-        <object-type>all</object-type>
-        <!-- Hidden from menu - only accessible via D-Bus -->
-    </effect>
+  <effect>
+    <object-type>all</object-type>
+  </effect>
 
-    <script>
-        <command location="inx" interpreter="python">inkscape_mcp.py</command>
-    </script>
+  <script>
+    <command location="inx" interpreter="python">inkscape_mcp.py</command>
+  </script>
 </inkscape-extension>
