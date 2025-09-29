@@ -247,11 +247,19 @@ def format_response(result: Dict[str, Any]) -> str:
                 "This enables later modification with execute-code commands."
             )
 
-        # Build final response
+        # Build final response with appropriate emoji
+        # Check if this is a failed code execution
+        is_code_failure = (
+            "execution_successful" in data and
+            data["execution_successful"] == False
+        )
+
+        emoji = "❌" if is_code_failure else "✅"
+
         if details:
-            return f"✅ {message}\n\n" + "\n".join(details)
+            return f"{emoji} {message}\n\n" + "\n".join(details)
         else:
-            return f"✅ {message}"
+            return f"{emoji} {message}"
 
     else:
         error = result.get("data", {}).get("error", "Unknown error")
@@ -290,10 +298,27 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
 
     ═══ CODE EXECUTION ═══
     Execute Python code - use 'svg' variable, not 'self.svg':
-    ✅ CORRECT: "execute-code code='rect = inkex.Rectangle(x=100, y=100, width=100, height=100); rect.set(\"fill\", \"blue\"); svg.append(rect)'"
-    ✅ CORRECT: "execute-code code='for i in range(3): svg.append(inkex.Circle(cx=i*50, cy=100, r=20))'"
+    CRITICAL: inkex elements require .set() method with string values, NOT constructor arguments!
+
+    ✅ CORRECT: "execute-code code='rect = inkex.Rectangle(); rect.set(\"x\", \"100\"); rect.set(\"y\", \"100\"); rect.set(\"width\", \"100\"); rect.set(\"height\", \"100\"); rect.set(\"fill\", \"blue\"); svg.append(rect)'"
+    ✅ CORRECT: "execute-code code='circle = inkex.Circle(); circle.set(\"cx\", \"150\"); circle.set(\"cy\", \"100\"); circle.set(\"r\", \"20\"); svg.append(circle)'"
+
+    Single-line code (use semicolons for multiple statements):
+    ✅ CORRECT: "execute-code code='order=[\"el1\",\"el2\"]; for oid in order: el=svg.getElementById(oid); if el: parent=el.getparent(); parent.remove(el); svg.append(el)'"
+
+    Multiline code (MUST be properly quoted with single quotes):
+    ✅ CORRECT: "execute-code code='for i in range(3):\n    circle = inkex.Circle()\n    circle.set(\"cx\", str(i*50+100))\n    circle.set(\"cy\", \"100\")\n    circle.set(\"r\", \"20\")\n    svg.append(circle)'"
+
+    Element reordering pattern:
+    ✅ CORRECT: "execute-code code='el=svg.getElementById(\"my_element\"); if el: parent=el.getparent(); parent.remove(el); svg.append(el)'"
+
+    Element modification patterns:
+    ✅ CORRECT: "execute-code code='el=svg.getElementById(\"house_body\"); el.set(\"fill\", \"brown\") if el else None'"
 
     ❌ WRONG: "execute-code code='self.svg.append(...)'" - Use 'svg' not 'self.svg'!
+    ❌ WRONG: "execute-code code='rect = inkex.Rectangle(x=100, y=100)'" - Constructor args don't work!
+    ❌ WRONG: "execute-code code='circle = inkex.Circle(cx=100, cy=100, r=20)'" - Use .set() method!
+    ❌ WRONG: Unquoted multiline code - Always wrap multiline code in single quotes!
 
     ═══ INFO & EXPORT OPERATIONS ═══
     ✅ "get-selection" - Get info about selected objects

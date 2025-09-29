@@ -198,9 +198,17 @@ def parse_attributes(param_str: str) -> Dict[str, Any]:
 
     attributes = {}
 
-    # Enhanced regex to handle quoted values, arrays, and objects
+    # Enhanced regex to handle quoted values, arrays, and objects (including multiline)
+    # Pattern explanation:
+    # - (\w+(?:[_-]\w+)*) : key name with optional hyphens/underscores
+    # - = : equals sign
+    # - Group of alternatives for value:
+    #   - "([^"]*)" : double quoted content (group 2)
+    #   - '([^']*)' : single quoted content (group 3)
+    #   - (\[(?:[^\[\]]|\{[^}]*\}|\[[^\]]*\])*\]) : array content (group 4)
+    #   - ([^\s,=]+) : unquoted content (group 5)
     param_pattern = r'(\w+(?:[_-]\w+)*)=("([^"]*)"|\'([^\']*)\'|(\[(?:[^\[\]]|\{[^}]*\}|\[[^\]]*\])*\])|([^\s,=]+))'
-    raw_matches = re.findall(param_pattern, param_str)
+    raw_matches = re.findall(param_pattern, param_str, re.DOTALL)
 
     for match in raw_matches:
         key = match[0]
@@ -403,6 +411,18 @@ Examples:
   # Create a linear gradient with stops
   python generic_client.py linearGradient "x1=0 y1=0 x2=100 y2=100 children=[{\"tag\":\"stop\",\"attributes\":{\"offset\":\"0%\",\"stop-color\":\"blue\"}},{\"tag\":\"stop\",\"attributes\":{\"offset\":\"100%\",\"stop-color\":\"red\"}}]"
 
+  # Execute code from string (multiline requires quotes)
+  python generic_client.py execute-code "code='for i in range(3): print(i)'"
+
+  # Execute code from file (file contains Python code)
+  python generic_client.py execute-code -f my_script.py
+
+  # Execute batch commands from file (file contains multiple command lines)
+  python generic_client.py batch -f batch_commands.txt
+
+  # Use file for parameters (file content replaces parameter string)
+  python generic_client.py circle -f circle_params.txt
+
   # Get selection info
   python generic_client.py get-selection ""
 
@@ -413,14 +433,79 @@ Examples:
 
     parser.add_argument("tag", help="SVG tag name or info action")
     parser.add_argument("params", nargs="?", default="", help="Parameters string")
+    parser.add_argument("-f", "--file", help="Read parameters from file")
 
     args = parser.parse_args()
 
     client = GenericInkscapeClient()
 
     try:
+        # Initialize params
+        params = args.params
+
+        # Handle file input
+        if args.file:
+            if not os.path.exists(args.file):
+                print(f"❌ File not found: {args.file}", file=sys.stderr)
+                return 1
+
+            with open(args.file, 'r') as f:
+                file_content = f.read().strip()
+
+            if args.tag == "execute-code":
+                # For execute-code, treat file content as Python code
+                if params.strip() and 'code=' in params:
+                    print(f"❌ Cannot use both -f option and code= parameter", file=sys.stderr)
+                    return 1
+
+                # Build code parameter from file content
+                if params.strip():
+                    params = f"{params} code='{file_content}'"
+                else:
+                    params = f"code='{file_content}'"
+
+                # Build element data and execute single command
+                element_data = client.build_element_data(args.tag, params)
+                result = client.execute_command(element_data)
+            elif args.tag == "batch":
+                # For batch command, treat file as batch of command lines
+                if params.strip():
+                    print(f"❌ Cannot use parameters with batch command", file=sys.stderr)
+                    return 1
+
+                # Process each line as a separate command
+                lines = [line.strip() for line in file_content.split('\n') if line.strip()]
+                results = []
+
+                for line_num, line in enumerate(lines, 1):
+                    try:
+                        # Parse each line as a complete command
+                        element_data = parse_tag_and_attributes(line)
+                        if element_data:
+                            result = client.execute_command(element_data)
+                            results.append(f"Line {line_num}: {client.format_response(result)}")
+                        else:
+                            results.append(f"Line {line_num}: ❌ Failed to parse command: {line}")
+                    except Exception as e:
+                        results.append(f"Line {line_num}: ❌ Error: {str(e)}")
+
+                # Print all results and return overall success
+                for result_line in results:
+                    print(result_line)
+
+                # Return success if all commands succeeded
+                all_success = all("❌" not in result_line for result_line in results)
+                return 0 if all_success else 1
+            else:
+                # For other commands with -f, file content replaces params
+                if params.strip():
+                    print(f"❌ Cannot use both -f option and parameters", file=sys.stderr)
+                    return 1
+                params = file_content
+
+        # Single command execution (either no file, or execute-code with file already processed)
         # Build element data
-        element_data = client.build_element_data(args.tag, args.params)
+        element_data = client.build_element_data(args.tag, params)
 
         # Execute command
         result = client.execute_command(element_data)
