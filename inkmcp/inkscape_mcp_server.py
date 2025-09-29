@@ -250,8 +250,8 @@ def format_response(result: Dict[str, Any]) -> str:
         # Build final response with appropriate emoji
         # Check if this is a failed code execution
         is_code_failure = (
-            "execution_successful" in data and
-            data["execution_successful"] == False
+            "execution_successful" in data and data["execution_successful"] == False
+            "execution_successful" in data and data["execution_successful"] == False
         )
 
         emoji = "❌" if is_code_failure else "✅"
@@ -327,6 +327,7 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
 
     ═══ GRADIENTS ═══
     ✅ "linearGradient stops='[[\"0%\",\"red\"],[\"100%\",\"blue\"]]' x1=0 y1=0 x2=100 y2=100"
+    ✅ "radialGradient cx=100 cy=100 r=200 stops='[[\"0%\",\"green\"],[\"50%\",\"yellow\"],[\"100%\",\"red\"]]"
 
     ═══ ID MANAGEMENT ═══
     ALWAYS specify id for every element - this enables later modification and scene management:
@@ -368,7 +369,7 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
         os.close(response_fd)
 
         # Parse the command string using the same logic as our client
-        from refactor.generic_client import parse_command_string
+        from inkmcpcli import parse_command_string
 
         parsed_data = parse_command_string(command)
 
@@ -413,4 +414,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
