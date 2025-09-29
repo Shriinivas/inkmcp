@@ -44,9 +44,17 @@ Quoting Guidelines:
     - Escape quotes when needed: 'content=\"Hello World\"'
     - For spaces in values: 'font-family=\"Arial Black\"'
 
+Info Functions:
+    python generic_client.py get-selection ""
+    python generic_client.py get-info ""
+    python generic_client.py get-info-by-id "id=rect1"
+    python generic_client.py export-document-image "format=png max_size=400 area=page"
+    python generic_client.py execute-code "code='circle = Circle(); circle.set(\"r\", \"50\"); svg.append(circle)'"
+
 Supported Elements:
     - All standard SVG elements (circle, rect, line, path, text, g, etc.)
     - Gradient elements (linearGradient, radialGradient with stops)
+    - Info functions (get-selection, get-info, get-info-by-id, export-document-image)
     - Dynamic class mapping: tag → Capitalized inkex class (e.g., linearGradient → LinearGradient)
 
 Known Issue: objectBoundingBox gradients require manual nudge to refresh visibility in Inkscape UI
@@ -66,6 +74,165 @@ import re
 from typing import Dict, List, Any, Optional, Union
 
 
+def parse_children_array(children_str: str) -> List[Dict[str, Any]]:
+    """
+    Parse children array string like "[{rect 'x=0 y=0'}, {circle 'cx=25 cy=25'}]"
+
+    Args:
+        children_str: String containing children array
+
+    Returns:
+        List of parsed child element dictionaries
+    """
+    if not children_str.strip():
+        return []
+
+    children_str = children_str.strip()
+
+    # Remove outer brackets
+    if children_str.startswith('[') and children_str.endswith(']'):
+        children_str = children_str[1:-1].strip()
+
+    if not children_str:
+        return []
+
+    children = []
+    brace_count = 0
+    current_child = ""
+    i = 0
+
+    while i < len(children_str):
+        char = children_str[i]
+
+        if char == '{':
+            brace_count += 1
+            if brace_count == 1:
+                current_child = ""  # Start new child, don't include opening brace
+                i += 1
+                continue
+
+        elif char == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                # End of current child, parse it
+                if current_child.strip():
+                    child_data = parse_tag_and_attributes(current_child.strip())
+                    if child_data:
+                        children.append(child_data)
+                current_child = ""
+                i += 1
+                continue
+
+        elif char == ',' and brace_count == 0:
+            # Skip commas between top-level children
+            i += 1
+            continue
+
+        if brace_count > 0:
+            current_child += char
+
+        i += 1
+
+    # Handle any remaining child
+    if current_child.strip():
+        child_data = parse_tag_and_attributes(current_child.strip())
+        if child_data:
+            children.append(child_data)
+
+    return children
+
+
+def parse_tag_and_attributes(content: str) -> Dict[str, Any]:
+    """
+    Parse content like "stop 'offset=\"0%\" stop-color=\"blue\"'" into element data
+
+    Args:
+        content: String with tag followed by attributes
+
+    Returns:
+        Element data dictionary or None if parsing fails
+    """
+    content = content.strip()
+    if not content:
+        return None
+
+    # Split into tag and attributes
+    parts = content.split(None, 1)  # Split on first whitespace
+    if not parts:
+        return None
+
+    tag = parts[0]
+    attr_str = parts[1] if len(parts) > 1 else ""
+
+    # Parse attributes using existing logic
+    attributes = parse_attributes(attr_str)
+
+    element_data = {
+        "tag": tag,
+        "attributes": attributes
+    }
+
+    # Handle nested children recursively
+    if 'children' in attributes:
+        children_value = attributes.pop('children')
+        if isinstance(children_value, str):
+            element_data["children"] = parse_children_array(children_value)
+        else:
+            element_data["children"] = children_value
+
+    return element_data
+
+
+def parse_attributes(param_str: str) -> Dict[str, Any]:
+    """
+    Parse parameter string into attributes dictionary
+
+    Args:
+        param_str: Parameter string like "x1=0 y1=0 fill=blue children=[{...}]"
+
+    Returns:
+        Dictionary with parsed attributes
+    """
+    if not param_str.strip():
+        return {}
+
+    attributes = {}
+
+    # Enhanced regex to handle quoted values, arrays, and objects
+    param_pattern = r'(\w+(?:[_-]\w+)*)=("([^"]*)"|\'([^\']*)\'|(\[(?:[^\[\]]|\{[^}]*\}|\[[^\]]*\])*\])|([^\s,=]+))'
+    raw_matches = re.findall(param_pattern, param_str)
+
+    for match in raw_matches:
+        key = match[0]
+        full_value = match[1]
+
+        # Extract the actual value based on quoting type
+        if full_value.startswith('"') and full_value.endswith('"'):
+            value = match[2]  # Double quoted content
+        elif full_value.startswith("'") and full_value.endswith("'"):
+            value = match[3]  # Single quoted content
+        elif full_value.startswith('['):
+            value = match[4]  # Array content (keep as string for later parsing)
+        else:
+            value = match[5]  # Unquoted content
+
+        # Handle special array values
+        if key == 'children' and isinstance(value, str) and value.startswith('['):
+            # Keep as string for later recursive parsing
+            attributes[key] = value
+        elif value.startswith('[') and value.endswith(']'):
+            # Try to parse as JSON array
+            try:
+                attributes[key] = json.loads(value)
+            except json.JSONDecodeError:
+                # Keep as string if JSON parsing fails
+                attributes[key] = value
+        else:
+            attributes[key] = value
+
+    return attributes
+
+
 class GenericInkscapeClient:
     """D-Bus client for generic SVG element creation"""
 
@@ -75,157 +242,8 @@ class GenericInkscapeClient:
         self.dbus_interface = "org.gtk.Actions"
         self.action_name = "org.mcp.inkscape.draw.generic"
 
-    def parse_children_array(self, children_str: str) -> List[Dict[str, Any]]:
-        """
-        Parse children array string into list of element data
 
-        Args:
-            children_str: String like "[{stop 'offset=\"0%\"'}, {circle 'cx=10'}]"
 
-        Returns:
-            List of element data dictionaries
-        """
-        children = []
-
-        # Remove outer brackets
-        if children_str.startswith('[') and children_str.endswith(']'):
-            inner = children_str[1:-1].strip()
-
-            if not inner:
-                return children
-
-            # Simple approach: find balanced braces
-            child_strings = []
-            current = ""
-            brace_count = 0
-            i = 0
-
-            while i < len(inner):
-                char = inner[i]
-
-                if char == '{':
-                    if brace_count == 0:
-                        # Start of new child
-                        current = char
-                    else:
-                        current += char
-                    brace_count += 1
-                elif char == '}':
-                    current += char
-                    brace_count -= 1
-                    if brace_count == 0:
-                        # End of current child
-                        child_strings.append(current.strip())
-                        current = ""
-                        # Skip comma and whitespace
-                        i += 1
-                        while i < len(inner) and inner[i] in [',', ' ', '\t', '\n']:
-                            i += 1
-                        i -= 1  # Compensate for the loop increment
-                elif brace_count > 0:
-                    # Inside braces, collect everything
-                    current += char
-
-                i += 1
-
-            # Add any remaining content
-            if current.strip():
-                child_strings.append(current.strip())
-
-            # Parse each child string
-            for child_str in child_strings:
-                if child_str.startswith('{') and child_str.endswith('}'):
-                    child_content = child_str[1:-1].strip()
-                    # Parse as "tag attributes"
-                    child_data = self.parse_tag_and_attributes(child_content)
-                    if child_data:
-                        children.append(child_data)
-
-        return children
-
-    def parse_tag_and_attributes(self, content: str) -> Dict[str, Any]:
-        """
-        Parse content like "stop 'offset=\"0%\" stop-color=\"blue\"'" into element data
-
-        Args:
-            content: String with tag followed by attributes
-
-        Returns:
-            Element data dictionary or None if parsing fails
-        """
-        content = content.strip()
-        if not content:
-            return None
-
-        # Split into tag and attributes
-        parts = content.split(None, 1)  # Split on first whitespace
-        if not parts:
-            return None
-
-        tag = parts[0]
-        attr_str = parts[1] if len(parts) > 1 else ""
-
-        # Parse attributes using existing logic
-        attributes = self.parse_attributes(attr_str)
-
-        element_data = {
-            "tag": tag,
-            "attributes": attributes
-        }
-
-        # Handle nested children recursively
-        if 'children' in attributes:
-            children_value = attributes.pop('children')
-            if isinstance(children_value, str):
-                element_data["children"] = self.parse_children_array(children_value)
-            else:
-                element_data["children"] = children_value
-
-        return element_data
-
-    def parse_attributes(self, param_str: str) -> Dict[str, Any]:
-        """
-        Parse parameter string into attributes dictionary
-
-        Args:
-            param_str: Parameter string like "x1=0 y1=0 fill=blue children=[{...}]"
-
-        Returns:
-            Dictionary with parsed attributes
-        """
-        if not param_str.strip():
-            return {}
-
-        attributes = {}
-
-        # Enhanced regex to handle quoted values, arrays, and objects
-        param_pattern = r'(\w+(?:[_-]\w+)*)=("([^"]*)"|\'([^\']*)\'|(\[(?:[^\[\]]|\{[^}]*\}|\[[^\]]*\])*\])|([^\s,=]+))'
-        raw_matches = re.findall(param_pattern, param_str)
-
-        for match in raw_matches:
-            key = match[0]
-
-            # Extract value from capture groups
-            if match[2]:  # double-quoted
-                value = match[2]
-            elif match[3]:  # single-quoted
-                value = match[3]
-            elif match[4]:  # array (children)
-                value = match[4]
-            else:  # unquoted
-                value = match[5] if match[5] else match[1]
-
-            # Handle children arrays specially
-            if key == 'children' and isinstance(value, str) and value.startswith('['):
-                attributes[key] = value  # Keep as string for further processing
-            elif value.lower() in ['true', 'false']:
-                attributes[key] = value.lower() == 'true'
-            elif value.lower() in ['none', 'null']:
-                attributes[key] = None
-            else:
-                attributes[key] = value
-
-        return attributes
 
     def build_element_data(self, tag: str, param_str: str) -> Dict[str, Any]:
         """
@@ -240,7 +258,7 @@ class GenericInkscapeClient:
         """
         # Use the unified parsing approach
         full_content = f"{tag} {param_str}".strip()
-        return self.parse_tag_and_attributes(full_content)
+        return parse_tag_and_attributes(full_content)
 
     def execute_command(self, element_data: Dict[str, Any]) -> Dict[str, Any]:
         """Execute command via D-Bus"""
@@ -311,7 +329,24 @@ class GenericInkscapeClient:
                 data = response_data.get("data", {})
                 element_id = data.get("id", "unknown")
                 message = data.get("message", "Element created successfully")
-                return f"✅ {message}\n**ID**: `{element_id}`"
+
+                # Format detailed info for info commands
+                status_emoji = "✅" if data.get("execution_successful", True) != False else "❌"
+                result_lines = [f"{status_emoji} {message}"]
+                if element_id != "unknown":
+                    result_lines.append(f"**ID**: `{element_id}`")
+
+                # Add detailed data for info commands
+                for key, value in data.items():
+                    if key not in ["id", "message"]:
+                        if isinstance(value, dict):
+                            result_lines.append(f"**{key.title()}**: {json.dumps(value, indent=2)}")
+                        elif isinstance(value, list):
+                            result_lines.append(f"**{key.title()}**: {json.dumps(value, indent=2)}")
+                        else:
+                            result_lines.append(f"**{key.title()}**: {value}")
+
+                return "\n".join(result_lines)
             else:
                 error = response_data.get("data", {}).get("error", "Unknown error")
                 return f"❌ Error: {error}"
@@ -329,7 +364,24 @@ class GenericInkscapeClient:
                 data = response_data.get("data", {})
                 element_id = data.get("id", "unknown")
                 message = data.get("message", "Element created successfully")
-                return f"✅ {message}\n**ID**: `{element_id}`"
+
+                # Format detailed info for info commands (fallback path)
+                status_emoji = "✅" if data.get("execution_successful", True) != False else "❌"
+                result_lines = [f"{status_emoji} {message}"]
+                if element_id != "unknown":
+                    result_lines.append(f"**ID**: `{element_id}`")
+
+                # Add detailed data for info commands
+                for key, value in data.items():
+                    if key not in ["id", "message"]:
+                        if isinstance(value, dict):
+                            result_lines.append(f"**{key.title()}**: {json.dumps(value, indent=2)}")
+                        elif isinstance(value, list):
+                            result_lines.append(f"**{key.title()}**: {json.dumps(value, indent=2)}")
+                        else:
+                            result_lines.append(f"**{key.title()}**: {value}")
+
+                return "\n".join(result_lines)
             else:
                 error = response_data.get("data", {}).get("error", "Unknown error")
                 return f"❌ Error: {error}"
@@ -382,6 +434,20 @@ Examples:
     except Exception as e:
         print(f"❌ Client error: {str(e)}", file=sys.stderr)
         return 1
+
+
+def parse_command_string(command: str) -> Dict[str, Any]:
+    """
+    Standalone function to parse command string for server use
+
+    Args:
+        command: Command string like "rect x=100 y=50 width=200 height=100"
+                or "g map_id=myGroup children=[{rect map_id=r1 x=0 y=0}]"
+
+    Returns:
+        Parsed element data dictionary
+    """
+    return parse_tag_and_attributes(command)
 
 
 if __name__ == "__main__":

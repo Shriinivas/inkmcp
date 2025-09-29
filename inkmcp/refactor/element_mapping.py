@@ -8,6 +8,11 @@ TAG_TO_CLASS_MAPPING = {
     "rect": "Rectangle",
     "text": "TextElement",
     "path": "PathElement",
+    # Group elements
+    "g": "Group",
+    # Other common elements
+    "use": "Use",
+    "image": "Image",
 }
 
 # Module categories for placement logic

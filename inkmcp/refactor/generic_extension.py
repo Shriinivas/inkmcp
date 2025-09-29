@@ -7,11 +7,17 @@ Handles any SVG element through dynamic class instantiation
 import inkex
 import json
 import os
-import sys
 import tempfile
-import time
-from typing import Dict, Any, List, Optional
-from element_mapping import get_element_class, should_place_in_defs, ensure_defs_section, get_unique_id
+from typing import Dict, Any
+from element_mapping import (
+    get_element_class,
+    should_place_in_defs,
+    ensure_defs_section,
+    get_unique_id,
+)
+from common import get_element_info_data
+from export_operations import export_document_image
+from execute_operations import execute_code
 
 
 class GenericElementCreator(inkex.EffectExtension):
@@ -32,17 +38,23 @@ class GenericElementCreator(inkex.EffectExtension):
     #     # Suppress all debug output to avoid UI interference
     #     pass
 
-    def create_element_recursive(self, svg, element_data: Dict[str, Any]) -> inkex.BaseElement:
+    def create_element_recursive(
+        self, svg, element_data: Dict[str, Any], id_mapping: Dict[str, str] = None
+    ) -> inkex.BaseElement:
         """
-        Create SVG element recursively with children
+        Create SVG element recursively with children and track ID mappings
 
         Args:
             svg: SVG document
             element_data: Element data with tag, attributes, and children
+            id_mapping: Dictionary to collect map_id -> actual_id mappings
 
         Returns:
             Created SVG element
         """
+        if id_mapping is None:
+            id_mapping = {}
+
         tag = element_data.get("tag", "")
         attributes = element_data.get("attributes", {})
         children = element_data.get("children", [])
@@ -55,24 +67,33 @@ class GenericElementCreator(inkex.EffectExtension):
         # Create element instance
         element = ElementClass()
 
-        # Set unique ID
+        # Handle map_id and regular id
+        map_id = attributes.get("map_id")
         custom_id = attributes.get("id")
-        element_id = get_unique_id(svg, tag, custom_id)
-        element.set('id', element_id)
 
-        # Set all attributes
+        # Generate unique ID - prefer custom_id if provided, otherwise use tag
+        element_id = get_unique_id(svg, tag, custom_id)
+        element.set("id", element_id)
+
+        # Track map_id mapping if provided
+        if map_id:
+            id_mapping[map_id] = element_id
+
+        # Set all attributes except map_id and id (already handled)
         for attr_name, attr_value in attributes.items():
-            if attr_name != "id":  # ID already set
+            if attr_name not in ("id", "map_id"):
                 element.set(attr_name, str(attr_value))
 
-        # Process children recursively
+        # Process children recursively with same id_mapping
         for child_data in children:
-            child_element = self.create_element_recursive(svg, child_data)
+            child_element = self.create_element_recursive(svg, child_data, id_mapping)
             element.append(child_element)
 
         return element
 
-    def handle_info_action(self, svg, action: str, attributes: Dict[str, Any]) -> Dict[str, Any]:
+    def handle_info_action(
+        self, svg, action: str, attributes: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
         Handle info/query actions that don't create elements
 
@@ -86,46 +107,64 @@ class GenericElementCreator(inkex.EffectExtension):
         """
         try:
             if action == "get-selection":
-                return self.get_selection_info(svg)
+                return self.get_selection_info()
             elif action == "get-info":
                 return self.get_document_info(svg)
             elif action == "get-info-by-id":
                 element_id = attributes.get("id", "")
                 return self.get_element_info(svg, element_id)
+            elif action == "export-document-image":
+                return export_document_image(self, svg, attributes)
+            elif action == "execute-code":
+                return execute_code(self, svg, attributes)
             else:
                 return {
                     "status": "error",
-                    "data": {"error": f"Unknown info action: {action}"}
+                    "data": {"error": f"Unknown info action: {action}"},
                 }
         except Exception as e:
             return {
                 "status": "error",
-                "data": {"error": f"Info action failed: {str(e)}"}
+                "data": {"error": f"Info action failed: {str(e)}"},
             }
 
-    def get_selection_info(self, svg) -> Dict[str, Any]:
+    def get_selection_info(self) -> Dict[str, Any]:
         """Get information about current selection"""
-        # For now, return placeholder - would need selection tracking
-        return {
-            "status": "success",
-            "data": {
-                "message": "Selection info (placeholder)",
-                "count": 0,
-                "elements": []
+        try:
+            # Get selected elements - Inkscape passes them via self.svg.selected
+            selected = self.svg.selected
+
+            # Extract info for each selected element
+            elements = []
+            for elem_id, element in selected.items():
+                elem_info = get_element_info_data(element)
+                elements.append(elem_info)
+
+            return {
+                "status": "success",
+                "data": {
+                    "message": "Selection information retrieved successfully",
+                    "count": len(selected),
+                    "elements": elements,
+                },
             }
-        }
+        except Exception as e:
+            return {
+                "status": "error",
+                "data": {"error": f"Failed to get selection info: {str(e)}"},
+            }
 
     def get_document_info(self, svg) -> Dict[str, Any]:
         """Get document information"""
         try:
-            viewbox = svg.get('viewBox', '0 0 100 100').split()
-            width = svg.get('width', 'unknown')
-            height = svg.get('height', 'unknown')
+            viewbox = svg.get("viewBox", "0 0 100 100").split()
+            width = svg.get("width", "unknown")
+            height = svg.get("height", "unknown")
 
             # Count elements by type
             element_counts = {}
             for elem in svg.iter():
-                tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
                 element_counts[tag] = element_counts.get(tag, 0) + 1
 
             return {
@@ -134,44 +173,43 @@ class GenericElementCreator(inkex.EffectExtension):
                     "message": "Document information",
                     "dimensions": {"width": width, "height": height},
                     "viewBox": viewbox,
-                    "elementCounts": element_counts
-                }
+                    "elementCounts": element_counts,
+                },
             }
         except Exception as e:
             return {
                 "status": "error",
-                "data": {"error": f"Failed to get document info: {str(e)}"}
+                "data": {"error": f"Failed to get document info: {str(e)}"},
             }
 
     def get_element_info(self, svg, element_id: str) -> Dict[str, Any]:
         """Get information about specific element"""
         try:
             element = svg.getElementById(element_id)
-            if not element:
+            if element is None:
                 return {
                     "status": "error",
-                    "data": {"error": f"Element not found: {element_id}"}
+                    "data": {"error": f"Element not found: {element_id}"},
                 }
 
+            element_info = get_element_info_data(element)
             return {
                 "status": "success",
                 "data": {
                     "message": f"Element information for {element_id}",
-                    "id": element_id,
-                    "tag": element.tag.split('}')[-1] if '}' in element.tag else element.tag,
-                    "attributes": dict(element.attrib)
-                }
+                    **element_info,
+                },
             }
         except Exception as e:
             return {
                 "status": "error",
-                "data": {"error": f"Failed to get element info: {str(e)}"}
+                "data": {"error": f"Failed to get element info: {str(e)}"},
             }
 
     def write_response(self, response_data: Dict[str, Any], response_file_path: str):
         """Write response to response file (like original system)"""
         try:
-            with open(response_file_path, 'w') as f:
+            with open(response_file_path, "w") as f:
                 json.dump(response_data, f)
         except Exception:
             # Silent failure - avoid any output that could interfere with Inkscape
@@ -179,18 +217,19 @@ class GenericElementCreator(inkex.EffectExtension):
 
     def effect(self):
         """Main extension entry point"""
+        element_data = {}  # Initialize to avoid unbound variable
         try:
             # Read JSON data from fixed file path (like original system)
             params_file = os.path.join(tempfile.gettempdir(), "mcp_params.json")
             if not os.path.exists(params_file):
                 response = {
                     "status": "error",
-                    "data": {"error": "No parameters file found"}
+                    "data": {"error": "No parameters file found"},
                 }
                 self.write_response(response, "/tmp/error_response.json")
                 return
 
-            with open(params_file, 'r') as f:
+            with open(params_file, "r") as f:
                 element_data = json.load(f)
 
             # Clean up the params file after reading (like original system)
@@ -202,8 +241,9 @@ class GenericElementCreator(inkex.EffectExtension):
             ElementClass = get_element_class(tag)
 
             if ElementClass:
-                # Create SVG element
-                element = self.create_element_recursive(self.svg, element_data)
+                # Create SVG element with ID mapping tracking
+                id_mapping = {}
+                element = self.create_element_recursive(self.svg, element_data, id_mapping)
 
                 # Determine placement
                 if should_place_in_defs(ElementClass):
@@ -212,15 +252,24 @@ class GenericElementCreator(inkex.EffectExtension):
                 else:
                     self.svg.append(element)
 
+                # Build response data
+                response_data = {
+                    "message": f"{tag} created successfully",
+                    "id": element.get("id"),
+                    "tag": tag,
+                    "attributes": dict(element.attrib),
+                }
+
+                # Add ID mapping if any map_ids were used
+                if id_mapping:
+                    response_data["id_mapping"] = id_mapping
+                    # Update message to reflect multiple elements if needed
+                    if len(id_mapping) > 1:
+                        response_data["message"] = f"{len(id_mapping)} elements created successfully"
 
                 response = {
                     "status": "success",
-                    "data": {
-                        "message": f"{tag} created successfully",
-                        "id": element.get('id'),
-                        "tag": tag,
-                        "attributes": dict(element.attrib)
-                    }
+                    "data": response_data,
                 }
 
             else:
@@ -229,18 +278,18 @@ class GenericElementCreator(inkex.EffectExtension):
                 response = self.handle_info_action(self.svg, tag, attributes)
 
             # Write response to response file if provided (like original system)
-            response_file = element_data.get('response_file')
+            response_file = element_data.get("response_file")
             if response_file:
                 self.write_response(response, response_file)
 
         except Exception as e:
             error_response = {
                 "status": "error",
-                "data": {"error": f"Extension failed: {str(e)}"}
+                "data": {"error": f"Extension failed: {str(e)}"},
             }
             # Try to write error to response file if available
             try:
-                response_file = element_data.get('response_file') if 'element_data' in locals() else None
+                response_file = element_data.get("response_file")
                 if response_file:
                     self.write_response(error_response, response_file)
             except:
@@ -255,3 +304,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
