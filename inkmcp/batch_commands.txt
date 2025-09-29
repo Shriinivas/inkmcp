@@ -1,4 +1,0 @@
-circle id=c1 cx=50 cy=50 r=20 fill=red
-circle id=c2 cx=100 cy=50 r=20 fill=green
-rect id=r1 x=150 y=30 width=40 height=40 fill=blue
-g id=group1 children=[{circle id=nested_c1 cx=250 cy=50 r=15 fill=purple}, {rect id=nested_r1 x=240 y=70 width=20 height=10 fill=orange}]
