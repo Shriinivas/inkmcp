@@ -71,7 +71,7 @@ import tempfile
 import os
 import subprocess
 import re
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any
 
 
 def parse_children_array(children_str: str) -> List[Dict[str, Any]]:
@@ -273,7 +273,8 @@ class InkscapeClient:
         """Execute command via D-Bus"""
         try:
             # Create temporary response file for reverse communication (like original system)
-            response_file = tempfile.mktemp(suffix='.json', prefix='inkmcp_response_')
+            response_fd, response_file = tempfile.mkstemp(suffix='.json', prefix='inkmcp_response_')
+            os.close(response_fd)  # Close the file descriptor, we just need the path
             element_data['response_file'] = response_file
 
             # Write parameters to fixed JSON file (like original system)
@@ -340,7 +341,7 @@ class InkscapeClient:
                 message = data.get("message", "Element created successfully")
 
                 # Format detailed info for info commands
-                status_emoji = "✅" if data.get("execution_successful", True) != False else "❌"
+                status_emoji = "✅" if data.get("execution_successful", True) else "❌"
                 result_lines = [f"{status_emoji} {message}"]
                 if element_id != "unknown":
                     result_lines.append(f"**ID**: `{element_id}`")
@@ -375,7 +376,7 @@ class InkscapeClient:
                 message = data.get("message", "Element created successfully")
 
                 # Format detailed info for info commands (fallback path)
-                status_emoji = "✅" if data.get("execution_successful", True) != False else "❌"
+                status_emoji = "✅" if data.get("execution_successful", True) else "❌"
                 result_lines = [f"{status_emoji} {message}"]
                 if element_id != "unknown":
                     result_lines.append(f"**ID**: `{element_id}`")
@@ -458,7 +459,7 @@ Examples:
             if args.tag == "execute-code":
                 # For execute-code, treat file content as Python code
                 if params.strip() and 'code=' in params:
-                    print(f"❌ Cannot use both -f option and code= parameter", file=sys.stderr)
+                    print("❌ Cannot use both -f option and code= parameter", file=sys.stderr)
                     return 1
 
                 # Build code parameter from file content
@@ -473,7 +474,7 @@ Examples:
             elif args.tag == "batch":
                 # For batch command, treat file as batch of command lines
                 if params.strip():
-                    print(f"❌ Cannot use parameters with batch command", file=sys.stderr)
+                    print("❌ Cannot use parameters with batch command", file=sys.stderr)
                     return 1
 
                 # Process each line as a separate command
@@ -541,7 +542,7 @@ Examples:
             else:
                 # For other commands with -f, file content replaces params
                 if params.strip():
-                    print(f"❌ Cannot use both -f option and parameters", file=sys.stderr)
+                    print("❌ Cannot use both -f option and parameters", file=sys.stderr)
                     return 1
                 params = file_content
 

@@ -1,6 +1,5 @@
 """Code execution operations module"""
 
-import sys
 import io
 import traceback
 from contextlib import redirect_stdout, redirect_stderr
@@ -72,7 +71,11 @@ def execute_code(extension_instance, svg, attributes: Dict[str, Any]) -> Dict[st
 
         # Add common Python libraries
         try:
-            import math, random, json, re, os
+            import math
+            import random
+            import json
+            import re
+            import os
             execution_globals.update({
                 'math': math,
                 'random': random,

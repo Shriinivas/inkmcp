@@ -7,7 +7,6 @@ Provides access to Inkscape operations through a unified tool interface
 for SVG element creation, document manipulation, and code execution.
 """
 
-import asyncio
 import json
 import logging
 import os
@@ -15,7 +14,7 @@ import subprocess
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, List, Optional, Union
+from typing import Any, AsyncIterator, Dict, Optional, Union
 
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import ImageContent
@@ -159,7 +158,7 @@ async def server_lifespan(server: FastMCP) -> AsyncIterator[Dict[str, Any]]:
     try:
         # Test connection on startup
         try:
-            connection = get_inkscape_connection()
+            get_inkscape_connection()
             logger.info("Successfully connected to Inkscape on startup")
         except Exception as e:
             logger.warning(f"Could not connect to Inkscape on startup: {e}")
@@ -250,7 +249,7 @@ def format_response(result: Dict[str, Any]) -> str:
         # Build final response with appropriate emoji
         # Check if this is a failed code execution
         is_code_failure = (
-            "execution_successful" in data and data["execution_successful"] == False
+            "execution_successful" in data and not data["execution_successful"]
         )
 
         emoji = "❌" if is_code_failure else "✅"
@@ -289,10 +288,6 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
     - Basic elements (rect, circle, text, path, etc.) → placed directly in <svg>
     - Definitions (linearGradient, radialGradient, pattern, filter, inkscape:path-effect, etc.) → automatically placed in <defs>
 
-    You don't need to worry about defs management - just create elements normally:
-    "linearGradient id=grad1 x1=0 y1=0 x2=100 y2=100" → automatically goes to <defs>
-    "rect id=shape1 x=50 y=50 width=100 height=100 fill=url(#grad1)" → uses the gradient
-
     Path effects example (use inkscape: namespace for Inkscape-specific elements):
     "inkscape:path-effect id=effect1 effect=powerstroke is_visible=true lpeversion=1.3 scale_width=1 interpolator_type=CentripetalCatmullRom interpolator_beta=0.2 start_linecap_type=zerowidth end_linecap_type=zerowidth offset_points='0.2,0.5 | 1,0.5 | 1.8,0.5' linejoin_type=round miter_limit=4 not_jump=false sort_points=true" → automatically goes to <defs>
     "path id=mypath d='M 20,50 C 20,50 80,20 80,80' inkscape:path-effect=#effect1 inkscape:original-d='M 20,50 C 20,50 80,20 80,80'" → path with effect applied
@@ -304,6 +299,11 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
     Patterns example (repeating graphics):
     "pattern id=dots width=20 height=20 patternUnits=userSpaceOnUse children=[{circle cx=10 cy=10 r=5 fill=red}]" → automatically goes to <defs>
     "rect id=patterned_rect x=100 y=100 width=100 height=100 fill=url(#dots)" → rectangle with dot pattern
+
+    IMPORTANT: Create defs elements (gradients, patterns, filters) as SEPARATE commands, not as children of groups:
+    ✅ CORRECT: "linearGradient id=grad1 ..." (separate command) → automatically goes to <defs>
+    ✅ CORRECT: "rect id=shape fill=url(#grad1)" (separate command) → uses the gradient
+    ❌ WRONG: "g children=[{linearGradient ...}, {rect ...}]" → this makes gradient stay inside group (not in defs!)
 
     ═══ NESTED ELEMENTS (Groups) ═══
     Groups with children - ALWAYS specify id for parent and ALL children:
@@ -408,7 +408,7 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
         if response_file and os.path.exists(response_file):
             try:
                 os.remove(response_file)
-            except:
+            except OSError:
                 pass
 
 

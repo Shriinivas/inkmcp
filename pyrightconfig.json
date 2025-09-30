@@ -1,0 +1,16 @@
+{
+  // "typeCheckingMode": "strict",
+  "reportDeprecated": "warning",
+  "reportMissingImports": "warning",
+  "reportUnusedImport": "information",
+  "exclude": [
+    "**/venv",
+    "**/node_modules",
+    "**/__pycache__",
+    "**/internal"
+  ],
+  "extraPaths": [
+    "./inkmcp/venv/lib/python3.13/site-packages",
+    "/usr/share/inkscape/extensions"
+  ]
+}

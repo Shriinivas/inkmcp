@@ -312,7 +312,7 @@ class ElementCreator(inkex.EffectExtension):
                 response_file = element_data.get("response_file")
                 if response_file:
                     self.write_response(error_response, response_file)
-            except:
+            except Exception:
                 pass  # Silent error handling
 
 
