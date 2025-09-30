@@ -333,8 +333,12 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
     "export-document-image format=png return_base64=true" - Screenshot
 
     ═══ GRADIENTS ═══
-    "linearGradient stops='[[\"0%\",\"red\"],[\"100%\",\"blue\"]]' x1=0 y1=0 x2=100 y2=100"
-    "radialGradient cx=100 cy=100 r=200 stops='[[\"0%\",\"green\"],[\"50%\",\"yellow\"],[\"100%\",\"red\"]]'"
+    Use gradientUnits=userSpaceOnUse with absolute coordinates matching your shape:
+    "linearGradient id=grad1 x1=50 y1=50 x2=150 y2=50 gradientUnits=userSpaceOnUse children=[{stop offset=0% stop-color=red}, {stop offset=100% stop-color=blue}]"
+    "rect id=shape x=50 y=50 width=100 height=100 fill=url(#grad1)"
+
+    "radialGradient id=glow cx=200 cy=200 r=50 gradientUnits=userSpaceOnUse children=[{stop offset=0% stop-color=#fff}, {stop offset=100% stop-color=#f00}]"
+    "circle id=glowing_circle cx=200 cy=200 r=50 fill=url(#glow)"
 
     ═══ ID MANAGEMENT ═══
     ALWAYS specify id for every element - this enables later modification and scene management:

@@ -259,7 +259,12 @@ class ElementCreator(inkex.EffectExtension):
                     defs = ensure_defs_section(self.svg)
                     defs.append(element)
                 else:
-                    self.svg.append(element)
+                    # Place in active layer if available, otherwise in svg root
+                    current_layer = self.svg.get_current_layer()
+                    if current_layer is not None:
+                        current_layer.append(element)
+                    else:
+                        self.svg.append(element)
 
                 # Build response data
                 response_data = {
