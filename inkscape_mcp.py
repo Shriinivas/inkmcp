@@ -64,11 +64,13 @@ class ElementCreator(inkex.EffectExtension):
 
         # Get element class dynamically
         ElementClass = get_element_class(tag)
-        if not ElementClass:
-            raise ValueError(f"Unknown SVG element: {tag}")
 
-        # Create element instance
-        element = ElementClass()
+        if ElementClass:
+            # Create element using inkex class
+            element = ElementClass()
+        else:
+            # Fallback to raw lxml element for unmapped tags (like filter primitives)
+            element = inkex.etree.Element(tag)
 
         # Handle ID parameter - track both requested and generated
         requested_id = attributes.get("id")

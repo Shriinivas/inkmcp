@@ -295,7 +295,11 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
 
     Path effects example (use inkscape: namespace for Inkscape-specific elements):
     "inkscape:path-effect id=effect1 effect=powerstroke is_visible=true lpeversion=1.3 scale_width=1 interpolator_type=CentripetalCatmullRom interpolator_beta=0.2 start_linecap_type=zerowidth end_linecap_type=zerowidth offset_points='0.2,0.5 | 1,0.5 | 1.8,0.5' linejoin_type=round miter_limit=4 not_jump=false sort_points=true" → automatically goes to <defs>
-    "path id=mypath d='M 20,50 C 20,50 80,20 80,80' inkscape:path-effect=#effect1 inkscape:original-d='M 20,50 C 20,50 80,20 80,80'" → path with effect applied assuming the effect creation call returned path effect id effect1
+    "path id=mypath d='M 20,50 C 20,50 80,20 80,80' inkscape:path-effect=#effect1 inkscape:original-d='M 20,50 C 20,50 80,20 80,80'" → path with effect applied
+
+    Filters example (nested primitives with children syntax):
+    "filter id=grunge children=[{feTurbulence baseFrequency=2.5 numOctaves=3 result=noise}, {feColorMatrix in=noise type=saturate values=0}, {feComponentTransfer children=[{feFuncA type=discrete tableValues='0 0 .3 0 0 .7 0 0 1'}]}, {feComposite operator=out in=SourceGraphic in2=noise}]" → automatically goes to <defs>
+    "rect id=grunge_rect x=100 y=100 width=100 height=100 fill=blue filter=url(#grunge)" → rectangle with grunge texture
 
     ═══ NESTED ELEMENTS (Groups) ═══
     Groups with children - ALWAYS specify id for parent and ALL children:
