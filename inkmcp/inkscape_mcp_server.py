@@ -301,6 +301,10 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
     "filter id=grunge children=[{feTurbulence baseFrequency=2.5 numOctaves=3 result=noise}, {feColorMatrix in=noise type=saturate values=0}, {feComponentTransfer children=[{feFuncA type=discrete tableValues='0 0 .3 0 0 .7 0 0 1'}]}, {feComposite operator=out in=SourceGraphic in2=noise}]" → automatically goes to <defs>
     "rect id=grunge_rect x=100 y=100 width=100 height=100 fill=blue filter=url(#grunge)" → rectangle with grunge texture
 
+    Patterns example (repeating graphics):
+    "pattern id=dots width=20 height=20 patternUnits=userSpaceOnUse children=[{circle cx=10 cy=10 r=5 fill=red}]" → automatically goes to <defs>
+    "rect id=patterned_rect x=100 y=100 width=100 height=100 fill=url(#dots)" → rectangle with dot pattern
+
     ═══ NESTED ELEMENTS (Groups) ═══
     Groups with children - ALWAYS specify id for parent and ALL children:
     "g id=house children=[{rect id=house_body x=100 y=200 width=200 height=150 fill=#F5DEB3}, {path id=house_roof d='M 90,200 L 200,100 L 310,200 Z' fill=#A52A2A}]"
