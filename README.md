@@ -83,7 +83,7 @@ For Gemini, edit settings file:
 ```json
 {
   "mcpServers": {
-    "inkscape": {
+    "inkscape-mcp": {
       "command": "/home/USERNAME/.config/inkscape/extensions/inkmcp/run_inkscape_mcp.sh"
     }
   }
@@ -95,14 +95,10 @@ For Codex, edit configuration:
 # ~/.codex/config.toml
 ```
 ```toml
-[mcpServers.inkscape]
+[mcp_servers.inkscape-mcp]
 command = "/home/USERNAME/.config/inkscape/extensions/inkmcp/run_inkscape_mcp.sh"
 ```
 
-**Replace `USERNAME` with your actual Linux username. Example path:**
-- `/home/john/.config/inkscape/extensions/inkmcp/run_inkscape_mcp.sh`
-
-**⚠️ Remember: This currently works on Linux only due to D-Bus requirement.**
 
 ## Usage Examples
 
