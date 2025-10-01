@@ -104,12 +104,11 @@ command = "/home/USERNAME/.config/inkscape/extensions/inkmcp/run_inkscape_mcp.sh
 
 ### With AI Assistant (Claude Code/Gemini/etc) - Requires Running Inkscape
 ```
-"In Inkscape, draw a smooth sine wave starting at the left edge in the middle of the document"
+"In Inkscape, draw a smooth sine wave starting at the left edge in the middle of the document and apply power stroke path effect to it"
 "In Inkscape, create a beautiful logo with a radial gradient circle and elegant typography"
 "In Inkscape, draw a mathematical spiral using varying circle sizes with golden ratio"
 "In Inkscape, create a house illustration with gable roof, wooden door, and flower garden"
-"In Inkscape, design a data visualization chart with gradient bars and labels using current document size"
-"In Inkscape, create a sunset scene with linear gradient sky and radial gradient sun"
+"In Inkscape, design a data visualization chart with bars with hatch fill and labels using current document size"
 "In Inkscape, export the current document as high-resolution PNG for presentation"
 ```
 
