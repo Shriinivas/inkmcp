@@ -93,15 +93,16 @@ class ElementCreator(inkex.EffectExtension):
 
         # Set all attributes except id (already handled)
         for attr_name, attr_value in attributes.items():
-            attrSet = False
-            if hasattr(element, attr_name):
-                try:
-                    setattr(element, attr_name, attr_value)
-                    attrSet = True
-                except Exception as _:
-                    pass
-            if not attrSet and attr_name != "id":
-                element.set(attr_name, str(attr_value))
+            if attr_name != "id":
+                attrSet = False
+                if hasattr(element, attr_name):
+                    try:
+                        setattr(element, attr_name, attr_value)
+                        attrSet = True
+                    except Exception as _:
+                        pass
+                if not attrSet:
+                    element.set(attr_name, str(attr_value))
 
         # Process children recursively with same tracking lists
         for child_data in children:
