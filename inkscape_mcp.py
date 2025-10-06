@@ -39,7 +39,11 @@ class ElementCreator(inkex.EffectExtension):
     #     pass
 
     def create_element_recursive(
-        self, svg, element_data: Dict[str, Any], id_mapping: Dict[str, str] | None = None, generated_ids: List[str] | None = None
+        self,
+        svg,
+        element_data: Dict[str, Any],
+        id_mapping: Dict[str, str] | None = None,
+        generated_ids: List[str] | None = None,
     ) -> inkex.BaseElement:
         """
         Create SVG element recursively with children and track ID mappings
@@ -89,12 +93,21 @@ class ElementCreator(inkex.EffectExtension):
 
         # Set all attributes except id (already handled)
         for attr_name, attr_value in attributes.items():
-            if attr_name != "id":
+            attrSet = False
+            if hasattr(element, attr_name):
+                try:
+                    setattr(element, attr_name, attr_value)
+                    attrSet = True
+                except Exception as _:
+                    pass
+            if not attrSet and attr_name != "id":
                 element.set(attr_name, str(attr_value))
 
         # Process children recursively with same tracking lists
         for child_data in children:
-            child_element = self.create_element_recursive(svg, child_data, id_mapping, generated_ids)
+            child_element = self.create_element_recursive(
+                svg, child_data, id_mapping, generated_ids
+            )
             element.append(child_element)
 
         return element
@@ -252,7 +265,9 @@ class ElementCreator(inkex.EffectExtension):
                 # Create SVG element with ID tracking
                 id_mapping = {}
                 generated_ids = []
-                element = self.create_element_recursive(self.svg, element_data, id_mapping, generated_ids)
+                element = self.create_element_recursive(
+                    self.svg, element_data, id_mapping, generated_ids
+                )
 
                 # Determine placement
                 if should_place_in_defs(ElementClass):
@@ -285,7 +300,9 @@ class ElementCreator(inkex.EffectExtension):
 
                 # Update message to reflect multiple elements if needed
                 if total_elements > 1:
-                    response_data["message"] = f"{total_elements} elements created successfully"
+                    response_data["message"] = (
+                        f"{total_elements} elements created successfully"
+                    )
 
                 response = {
                     "status": "success",
@@ -324,4 +341,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
