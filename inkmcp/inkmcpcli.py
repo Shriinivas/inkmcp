@@ -74,6 +74,75 @@ import re
 from typing import Dict, List, Any
 
 
+def strip_python_comments(code: str) -> str:
+    """
+    Strip comments from Python code for more efficient transmission.
+    Removes:
+    - Lines starting with # (full-line comments)
+    - Inline comments (# at end of line)
+    
+    Preserves:
+    - # characters inside strings
+    - # characters in certain contexts (like f-strings, format strings)
+    
+    Args:
+        code: Python code string
+    
+    Returns:
+        Code with comments removed
+    """
+    if not code.strip():
+        return code
+    
+    lines = code.split('\n')
+    cleaned_lines = []
+    
+    for line in lines:
+        stripped = line.lstrip()
+        
+        # Skip full-line comments
+        if stripped.startswith('#'):
+            continue
+        
+        # Handle inline comments - simple approach that works for most cases
+        # Remove everything after # if it's not inside quotes
+        in_single_quote = False
+        in_double_quote = False
+        escape_next = False
+        cleaned_line = []
+        
+        for i, char in enumerate(line):
+            if escape_next:
+                cleaned_line.append(char)
+                escape_next = False
+                continue
+            
+            if char == '\\':
+                escape_next = True
+                cleaned_line.append(char)
+                continue
+            
+            if char == "'" and not in_double_quote:
+                in_single_quote = not in_single_quote
+                cleaned_line.append(char)
+            elif char == '"' and not in_single_quote:
+                in_double_quote = not in_double_quote
+                cleaned_line.append(char)
+            elif char == '#' and not in_single_quote and not in_double_quote:
+                # Found inline comment, stop here
+                break
+            else:
+                cleaned_line.append(char)
+        
+        result_line = ''.join(cleaned_line).rstrip()
+        
+        # Only add non-empty lines
+        if result_line:
+            cleaned_lines.append(result_line)
+    
+    return '\n'.join(cleaned_lines)
+
+
 def parse_children_array(children_str: str) -> List[Dict[str, Any]]:
     """
     Parse children array string like "[{rect 'x=0 y=0'}, {circle 'cx=25 cy=25'}]"
@@ -327,39 +396,37 @@ class InkscapeClient:
                 "error": f"Execution failed: {str(e)}"
             }
 
-    def format_response(self, result: Dict[str, Any]) -> str:
-        """Format the response for display"""
+    def format_response(self, result: Dict[str, Any], tag: str = "") -> str:
+        """Format the response for display - minimal output by default"""
         if not result.get("success"):
-            return f"❌ Error: {result.get('error', 'Unknown error')}"
+            return f"Error: {result.get('error', 'Unknown error')}"
 
         # Check if we have a proper response from response file
         if "response" in result:
             response_data = result["response"]
             if response_data.get("status") == "success":
                 data = response_data.get("data", {})
-                element_id = data.get("id", "unknown")
-                message = data.get("message", "Element created successfully")
-
-                # Format detailed info for info commands
-                status_emoji = "✅" if data.get("execution_successful", True) else "❌"
-                result_lines = [f"{status_emoji} {message}"]
-                if element_id != "unknown":
-                    result_lines.append(f"**ID**: `{element_id}`")
-
-                # Add detailed data for info commands
-                for key, value in data.items():
-                    if key not in ["id", "message"]:
-                        if isinstance(value, dict):
-                            result_lines.append(f"**{key.title()}**: {json.dumps(value, indent=2)}")
-                        elif isinstance(value, list):
-                            result_lines.append(f"**{key.title()}**: {json.dumps(value, indent=2)}")
-                        else:
-                            result_lines.append(f"**{key.title()}**: {value}")
-
-                return "\n".join(result_lines)
+                
+                # For execute-code, only show the actual output from print statements
+                if tag == "execute-code":
+                    if not data.get("execution_successful", True):
+                        # Show errors for failed execution
+                        errors = data.get("errors", "Unknown error")
+                        return f"Error: {errors}"
+                    else:
+                        # Only return the output from print() statements
+                        output = data.get("output", "").strip()
+                        return output if output else ""  # Empty string if no output
+                
+                # For other operations, minimal success message
+                message = data.get("message", "Success")
+                element_id = data.get("id")
+                if element_id:
+                    return f"{message} (id: {element_id})"
+                return message
             else:
                 error = response_data.get("data", {}).get("error", "Unknown error")
-                return f"❌ Error: {error}"
+                return f"Error: {error}"
 
         # Fallback to raw output parsing
         try:
@@ -372,33 +439,28 @@ class InkscapeClient:
 
             if response_data.get("status") == "success":
                 data = response_data.get("data", {})
-                element_id = data.get("id", "unknown")
-                message = data.get("message", "Element created successfully")
-
-                # Format detailed info for info commands (fallback path)
-                status_emoji = "✅" if data.get("execution_successful", True) else "❌"
-                result_lines = [f"{status_emoji} {message}"]
-                if element_id != "unknown":
-                    result_lines.append(f"**ID**: `{element_id}`")
-
-                # Add detailed data for info commands
-                for key, value in data.items():
-                    if key not in ["id", "message"]:
-                        if isinstance(value, dict):
-                            result_lines.append(f"**{key.title()}**: {json.dumps(value, indent=2)}")
-                        elif isinstance(value, list):
-                            result_lines.append(f"**{key.title()}**: {json.dumps(value, indent=2)}")
-                        else:
-                            result_lines.append(f"**{key.title()}**: {value}")
-
-                return "\n".join(result_lines)
+                
+                # For execute-code, only show the actual output from print statements
+                if tag == "execute-code":
+                    if not data.get("execution_successful", True):
+                        errors = data.get("errors", "Unknown error")
+                        return f"Error: {errors}"
+                    else:
+                        output = data.get("output", "").strip()
+                        return output if output else ""
+                
+                # For other operations, minimal success message
+                message = data.get("message", "Success")
+                element_id = data.get("id")
+                if element_id:
+                    return f"{message} (id: {element_id})"
+                return message
             else:
                 error = response_data.get("data", {}).get("error", "Unknown error")
-                return f"❌ Error: {error}"
+                return f"Error: {error}"
 
         except (json.JSONDecodeError, KeyError):
-            # Return raw output if parsing fails
-            return result.get("output", "Command completed")
+            return "Success"
 
 
 def main():
@@ -462,11 +524,14 @@ Examples:
                     print("❌ Cannot use both -f option and code= parameter", file=sys.stderr)
                     return 1
 
+                # Strip comments from code for efficiency
+                cleaned_code = strip_python_comments(file_content)
+                
                 # Build code parameter from file content
                 if params.strip():
-                    params = f"{params} code='{file_content}'"
+                    params = f"{params} code='{cleaned_code}'"
                 else:
-                    params = f"code='{file_content}'"
+                    params = f"code='{cleaned_code}'"
 
                 # Build element data and execute single command
                 element_data = client.build_element_data(args.tag, params)
@@ -526,8 +591,12 @@ Examples:
                         try:
                             element_data = parse_tag_and_attributes(line)
                             if element_data:
+                                # Strip comments if this is execute-code
+                                if element_data.get('tag') == 'execute-code' and 'code' in element_data.get('attributes', {}):
+                                    element_data['attributes']['code'] = strip_python_comments(element_data['attributes']['code'])
+                                
                                 result = client.execute_command(element_data)
-                                results.append(f"Line {line_num}: {client.format_response(result)}")
+                                results.append(f"Line {line_num}: {client.format_response(result, element_data.get('tag', ''))}")
                             else:
                                 results.append(f"Line {line_num}: ❌ Failed to parse command: {line}")
                         except Exception as e:
@@ -549,12 +618,16 @@ Examples:
         # Single command execution (either no file, or execute-code with file already processed)
         # Build element data
         element_data = client.build_element_data(args.tag, params)
+        
+        # Strip comments if this is execute-code command
+        if args.tag == 'execute-code' and 'code' in element_data.get('attributes', {}):
+            element_data['attributes']['code'] = strip_python_comments(element_data['attributes']['code'])
 
         # Execute command
         result = client.execute_command(element_data)
 
         # Format and display response
-        if args.parse_out:
+        if args.parse_out or args.pretty:
             # Structured JSON output
             output = {
                 "command": f"{args.tag} {params}".strip(),
@@ -562,18 +635,15 @@ Examples:
                 "params": params,
                 "result": result
             }
-        else:
-            # Human-readable format
-            output = client.format_response(result)
-
-        # Print output
-        if args.parse_out:
             if args.pretty:
                 print(json.dumps(output, indent=2))
             else:
                 print(json.dumps(output))
         else:
-            print(output)
+            # Minimal human-readable format
+            output = client.format_response(result, args.tag)
+            if output:  # Only print if there's output
+                print(output)
 
         return 0 if result.get("success") else 1
 
