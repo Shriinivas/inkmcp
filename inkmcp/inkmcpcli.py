@@ -532,10 +532,7 @@ Examples:
                     params = f"{params} code='{cleaned_code}'"
                 else:
                     params = f"code='{cleaned_code}'"
-
-                # Build element data and execute single command
-                element_data = client.build_element_data(args.tag, params)
-                result = client.execute_command(element_data)
+                # Note: execution happens in the unified path below (line ~618)
             elif args.tag == "batch":
                 # For batch command, treat file as batch of command lines
                 if params.strip():
