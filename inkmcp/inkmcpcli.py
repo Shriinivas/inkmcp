@@ -345,8 +345,8 @@ def execute_hybrid_code(client: 'InkscapeClient', code: str, args) -> Dict[str, 
                 # We need to inject the shared context as variable assignments
                 context_injection = []
                 for key, value in shared_context.items():
-                    # Serialize the value as Python literal
-                    context_injection.append(f"{key} = {json.dumps(value)}")
+                    # Serialize the value as Python literal using repr()
+                    context_injection.append(f"{key} = {repr(value)}")
                 
                 # Combine context injection with user code
                 full_inkscape_code = '\n'.join(context_injection) + '\n' + cleaned_code if context_injection else cleaned_code
