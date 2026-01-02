@@ -328,9 +328,11 @@ def execute_hybrid_code(client: 'InkscapeClient', code: str, args) -> Dict[str, 
                 shared_context.update(serializable)
                 
             except Exception as e:
+                import traceback
+                error_trace = traceback.format_exc()
                 return {
                     "success": False,
-                    "error": f"Local execution error in block {block_idx + 1}: {str(e)}",
+                    "error": f"Local execution error in block {block_idx + 1}: {str(e)}\n\n{error_trace}",
                     "block_type": "local",
                     "block_index": block_idx + 1
                 }
@@ -397,7 +399,13 @@ def execute_hybrid_code(client: 'InkscapeClient', code: str, args) -> Dict[str, 
                         shared_context.update(inkscape_vars)
                     
                     if not inkscape_result['execution_successful']:
-                        combined_errors.append(f"[Inkscape Block {block_idx + 1}] {inkscape_result.get('errors', '')}")
+                        # Fail fast on Inkscape errors
+                        return {
+                            "success": False,
+                            "error": f"Inkscape execution error in block {block_idx + 1}:\n{inkscape_result.get('errors', 'Unknown error')}",
+                            "block_type": "inkscape",
+                            "block_index": block_idx + 1
+                        }
                 else:
                     return {
                         "success": False,
