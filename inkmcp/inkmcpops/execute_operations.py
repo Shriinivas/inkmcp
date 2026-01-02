@@ -86,6 +86,16 @@ def execute_code(extension_instance, svg, attributes: Dict[str, Any]) -> Dict[st
         except ImportError:
             pass
 
+        # Add helper functions
+        def get_element_by_id(element_id):
+            """Helper function to find element by ID using iteration (getElementById doesn't work reliably)"""
+            for elem in svg.iter():
+                if elem.get('id') == element_id:
+                    return elem
+            return None
+        
+        execution_globals['get_element_by_id'] = get_element_by_id
+
         execution_locals = {}
 
         # Capture output if requested

@@ -409,7 +409,7 @@ def execute_hybrid_code(client: 'InkscapeClient', code: str, args) -> Dict[str, 
                 }
     
     # Build final result
-    final_output = '\n\n'.join(all_local_output) if all_local_output else ''
+    final_output = ''.join(all_local_output) if all_local_output else ''
     final_errors = '\n'.join(combined_errors) if combined_errors else None
     
     return {

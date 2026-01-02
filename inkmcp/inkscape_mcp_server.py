@@ -316,16 +316,13 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
     "execute-code code='circle = inkex.Circle(); circle.set(\"cx\", \"150\"); circle.set(\"cy\", \"100\"); circle.set(\"r\", \"20\"); svg.append(circle)'"
 
     Single-line code (use semicolons for multiple statements):
-    "execute-code code='order=[\"el1\",\"el2\"]; for oid in order: el=svg.getElementById(oid); if el: parent=el.getparent(); parent.remove(el); svg.append(el)'"
+    "execute-code code='for i in range(3): circle = inkex.Circle(); circle.set(\"cx\", str(i*50+100)); circle.set(\"cy\", \"100\"); circle.set(\"r\", \"20\"); svg.append(circle)'"
 
     Multiline code (MUST be properly quoted with single quotes):
     "execute-code code='for i in range(3):\n    circle = inkex.Circle()\n    circle.set(\"cx\", str(i*50+100))\n    circle.set(\"cy\", \"100\")\n    circle.set(\"r\", \"20\")\n    svg.append(circle)'"
 
-    Element reordering pattern:
-    "execute-code code='el=svg.getElementById(\"my_element\"); if el: parent=el.getparent(); parent.remove(el); svg.append(el)'"
-
-    Element modification patterns:
-    "execute-code code='el=svg.getElementById(\"house_body\"); el.set(\"fill\", \"brown\") if el else None'"
+    Finding and modifying elements by ID (use get_element_by_id helper):
+    "execute-code code='el = get_element_by_id(\"house_body\"); el.set(\"fill\", \"brown\") if el else None'"
 
     ═══ INFO & EXPORT OPERATIONS ═══
     "get-selection" - Get info about selected objects
@@ -358,10 +355,9 @@ def inkscape_operation(ctx: Context, command: str) -> Union[str, ImageContent]:
     - Parts: id=trunk1, id=house_body, id=car1_wheel_left
     - Sub-parts: id=foliage1_1, id=foliage1_2, id=house_window1
 
-    Later Modification Examples:
-    - Change trunk color: execute-code code="svg.getElementById('trunk1').set('fill', 'darkbrown')"
-    - Move entire tree: execute-code code="svg.getElementById('tree1').set('transform', 'translate(50,0)')"
-    - Add details: execute-code code="svg.getElementById('house').append(new_window_element)"
+    Later Modification Examples (use get_element_by_id helper):
+    - Change trunk color: execute-code code="el = get_element_by_id('trunk1'); el.set('fill', 'darkbrown') if el else None"
+    - Move entire tree: execute-code code="el = get_element_by_id('tree1'); el.set('transform', 'translate(50,0)') if el else None"
 
     """
     response_file = None
