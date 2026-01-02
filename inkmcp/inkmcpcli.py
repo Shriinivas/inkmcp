@@ -143,6 +143,287 @@ def strip_python_comments(code: str) -> str:
     return '\n'.join(cleaned_lines)
 
 
+def parse_hybrid_blocks(code: str) -> List[tuple[str, str]]:
+    """
+    Parse code into blocks based on magic comments.
+    
+    Magic comments:
+        # @local - Switch to local execution context
+        # @inkscape - Switch to Inkscape execution context
+    
+    Default: unmarked code at start is 'local'
+    
+    Args:
+        code: Python code with optional magic comments
+    
+    Returns:
+        List of (block_type, code_string) tuples
+        block_type is either 'local' or 'inkscape'
+    """
+    lines = code.split('\n')
+    blocks = []
+    current_type = 'local'  # Default to local
+    current_lines = []
+    
+    for line in lines:
+        stripped = line.strip()
+        
+        # Check for magic comments
+        if stripped == '# @local':
+            # Save current block if it has content
+            if current_lines:
+                blocks.append((current_type, '\n'.join(current_lines)))
+                current_lines = []
+            current_type = 'local'
+        elif stripped == '# @inkscape':
+            # Save current block if it has content
+            if current_lines:
+                blocks.append((current_type, '\n'.join(current_lines)))
+                current_lines = []
+            current_type = 'inkscape'
+        else:
+            # Regular code line
+            current_lines.append(line)
+    
+    # Add final block if it has content
+    if current_lines:
+        blocks.append((current_type, '\n'.join(current_lines)))
+    
+    return blocks
+
+
+def serialize_context_variables(local_vars: Dict[str, Any], exclude_names: set = None) -> Dict[str, Any]:
+    """
+    Extract JSON-serializable variables from local execution context.
+    
+    Args:
+        local_vars: Dictionary of local variables from exec()
+        exclude_names: Set of variable names to exclude (default: builtins and private)
+    
+    Returns:
+        Dictionary of serializable variables
+    
+    Raises:
+        TypeError: If a variable that should be serialized is not JSON-compatible
+    """
+    if exclude_names is None:
+        exclude_names = {'__builtins__', '__name__', '__doc__', '__package__',
+                        '__loader__', '__spec__', '__annotations__', '__cached__',
+                        '__file__'}
+    
+    serializable = {}
+    
+    for key, value in local_vars.items():
+        # Skip private/magic variables and excluded names
+        if key.startswith('_') or key in exclude_names:
+            continue
+        
+        # Test JSON serializability
+        try:
+            json.dumps(value)
+            serializable[key] = value
+        except (TypeError, ValueError) as e:
+            # Provide helpful error message
+            type_name = type(value).__name__
+            module = type(value).__module__
+            full_type = f"{module}.{type_name}" if module != 'builtins' else type_name
+            
+            error_msg = (
+                f"Variable '{key}' is not JSON-serializable\n"
+                f"  Type: {full_type}\n"
+                f"  Hint: Convert to a JSON-compatible type before using in @inkscape block\n"
+                f"  Example: {key}_list = list({key}) or {key}_dict = dict({key})"
+            )
+            raise TypeError(error_msg) from e
+    
+    return serializable
+
+
+def execute_hybrid_code(client: 'InkscapeClient', code: str, args) -> Dict[str, Any]:
+    """
+    Execute hybrid code with interleaved local and Inkscape execution.
+    
+    Execution flow:
+    1. Parse code into blocks (local/inkscape)
+    2. Execute each block in sequence
+    3. For local blocks: execute locally, capture serializable variables
+    4. For inkscape blocks: inject variables, execute via D-Bus, capture results
+    5. Continue until all blocks executed
+    
+    Args:
+        client: InkscapeClient instance
+        code: Hybrid code with magic comments
+        args: Command line arguments
+    
+    Returns:
+        Result dictionary with execution details
+    """
+    import io
+    from contextlib import redirect_stdout, redirect_stderr
+    
+    # Parse code into blocks
+    blocks = parse_hybrid_blocks(code)
+    
+    if not blocks:
+        return {
+            "success": False,
+            "error": "No code blocks found"
+        }
+    
+    # Shared context for variables
+    shared_context = {}
+    
+    # Track all outputs
+    all_local_output = []
+    all_inkscape_results = []
+    combined_errors = []
+    
+    # Execute each block
+    for block_idx, (block_type, block_code) in enumerate(blocks):
+        if not block_code.strip():
+            continue
+        
+        if block_type == 'local':
+            # Execute locally
+            try:
+                # Set up local execution environment with standard modules
+                injected_names = {'json', 're', 'os', 'sys', '__builtins__'}
+                local_env = {
+                    '__builtins__': __builtins__,
+                    'json': json,
+                    're': re,
+                    'os': os,
+                    'sys': sys,
+                }
+                
+                # Inject shared context (from previous blocks)
+                local_env.update(shared_context)
+                
+                # Capture output
+                stdout_capture = io.StringIO()
+                stderr_capture = io.StringIO()
+                
+                with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+                    exec(block_code, local_env)
+                
+                # Capture output
+                stdout_out = stdout_capture.getvalue()
+                stderr_out = stderr_capture.getvalue()
+                
+                if stdout_out:
+                    all_local_output.append(f"[Local Block {block_idx + 1}]\\n{stdout_out}")
+                if stderr_out:
+                    combined_errors.append(f"[Local Block {block_idx + 1} stderr]\\n{stderr_out}")
+                
+                # Update shared context with new/modified variables
+                # Exclude system modules we injected
+                exclude_set = injected_names.copy()
+                # Also exclude previously shared variables to avoid re-processing
+                # (they're already in shared_context)
+                serializable = serialize_context_variables(local_env, exclude_names=exclude_set)
+                shared_context.update(serializable)
+                
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Local execution error in block {block_idx + 1}: {str(e)}",
+                    "block_type": "local",
+                    "block_index": block_idx + 1
+                }
+        
+        elif block_type == 'inkscape':
+            # Execute in Inkscape via D-Bus
+            try:
+                # Strip comments from Inkscape code
+                cleaned_code = strip_python_comments(block_code)
+                
+                # Build element data for execute-code
+                # We need to inject the shared context as variable assignments
+                context_injection = []
+                for key, value in shared_context.items():
+                    # Serialize the value as Python literal
+                    context_injection.append(f"{key} = {json.dumps(value)}")
+                
+                # Combine context injection with user code
+                full_inkscape_code = '\n'.join(context_injection) + '\n' + cleaned_code if context_injection else cleaned_code
+                
+                # Build execute-code command
+                element_data = {
+                    'tag': 'execute-code',
+                    'attributes': {
+                        'code': full_inkscape_code,
+                        'return_output': True
+                    }
+                }
+                
+                # Execute via D-Bus
+                result = client.execute_command(element_data)
+                
+                if not result.get('success'):
+                    return {
+                        "success": False,
+                        "error": f"Inkscape execution error in block {block_idx + 1}: {result.get('error', 'Unknown error')}",
+                        "block_type": "inkscape",
+                        "block_index": block_idx + 1
+                    }
+                
+                # Extract inkscape result data
+                response_data = result.get('response', {})
+                if response_data.get('status') == 'success':
+                    data = response_data.get('data', {})
+                    
+                    # Store inkscape result for next local block
+                    inkscape_result = {
+                        'success': True,
+                        'execution_successful': data.get('execution_successful', False),
+                        'id_mapping': data.get('id_mapping', {}),
+                        'elements_created': data.get('elements_created', []),
+                        'output': data.get('output', ''),
+                        'errors': data.get('errors'),
+                        'element_counts': data.get('current_element_counts', {})
+                    }
+                    
+                    shared_context['inkscape_result'] = inkscape_result
+                    all_inkscape_results.append(inkscape_result)
+                    
+                    if not inkscape_result['execution_successful']:
+                        combined_errors.append(f"[Inkscape Block {block_idx + 1}] {inkscape_result.get('errors', '')}")
+                else:
+                    return {
+                        "success": False,
+                        "error": f"Inkscape block {block_idx + 1} failed: {response_data.get('data', {}).get('error', 'Unknown error')}",
+                        "block_type": "inkscape",
+                        "block_index": block_idx + 1
+                    }
+                    
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Error executing Inkscape block {block_idx + 1}: {str(e)}",
+                    "block_type": "inkscape",
+                    "block_index": block_idx + 1
+                }
+    
+    # Build final result
+    final_output = '\n\n'.join(all_local_output) if all_local_output else ''
+    final_errors = '\n'.join(combined_errors) if combined_errors else None
+    
+    return {
+        "success": True,
+        "response": {
+            "status": "success",
+            "data": {
+                "message": f"Hybrid execution completed ({len(blocks)} blocks)",
+                "blocks_executed": len(blocks),
+                "local_output": final_output,
+                "inkscape_results": all_inkscape_results,
+                "errors": final_errors,
+                "execution_successful": final_errors is None
+            }
+        }
+    }
+
+
 def parse_children_array(children_str: str) -> List[Dict[str, Any]]:
     """
     Parse children array string like "[{rect 'x=0 y=0'}, {circle 'cx=25 cy=25'}]"
@@ -484,6 +765,9 @@ Examples:
   # Execute batch commands from file (file contains multiple command lines)
   python inkmcpcli.py batch -f batch_commands.txt
 
+  # Execute hybrid code (interleaved local and Inkscape execution)
+  python inkmcpcli.py execute-hybrid -f hybrid_script.py
+
   # Use file for parameters (file content replaces parameter string)
   python inkmcpcli.py circle -f circle_params.txt
 
@@ -518,7 +802,37 @@ Examples:
             with open(args.file, 'r') as f:
                 file_content = f.read().strip()
 
-            if args.tag == "execute-code":
+            if args.tag == "execute-hybrid":
+                # For execute-hybrid, treat file content as hybrid Python code
+                if params.strip():
+                    print("❌ Cannot use parameters with execute-hybrid -f option", file=sys.stderr)
+                    return 1
+                
+                # Execute hybrid code
+                result = execute_hybrid_code(client, file_content, args)
+                
+                # Format and display response based on flags
+                if args.parse_out or args.pretty:
+                    # JSON output
+                    if args.pretty:
+                        print(json.dumps(result, indent=2))
+                    else:
+                        print(json.dumps(result))
+                else:
+                    # Minimal human-readable format
+                    if result.get('success'):
+                        data = result.get('response', {}).get('data', {})
+                        output = data.get('local_output', '')
+                        if output:
+                            print(output)
+                        # Show summary
+                        print(f"\n{data.get('message', 'Hybrid execution completed')}")
+                    else:
+                        print(f"Error: {result.get('error', 'Unknown error')}", file=sys.stderr)
+                
+                return 0 if result.get('success') else 1
+                
+            elif args.tag == "execute-code":
                 # For execute-code, treat file content as Python code
                 if params.strip() and 'code=' in params:
                     print("❌ Cannot use both -f option and code= parameter", file=sys.stderr)
