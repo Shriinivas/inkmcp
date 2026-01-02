@@ -157,6 +157,29 @@ def execute_code(extension_instance, svg, attributes: Dict[str, Any]) -> Dict[st
                 element_counts[tag] = element_counts.get(tag, 0) + 1
 
             result_data["current_element_counts"] = element_counts
+            
+            # Capture local variables for hybrid execution
+            # Serialize variables that were created/modified during execution
+            captured_vars = {}
+            for key, value in execution_locals.items():
+                # Skip private/magic variables
+                if key.startswith('_'):
+                    continue
+                # Skip modules and non-serializable types
+                if type(value).__name__ in ('module', 'function', 'type', 'builtin_function_or_method'):
+                    continue
+                # Try to serialize
+                try:
+                    import json
+                    json.dumps(value)  # Test if serializable
+                    captured_vars[key] = value
+                except (TypeError, ValueError):
+                    # Skip non-serializable values
+                    pass
+            
+            if captured_vars:
+                result_data["local_variables"] = captured_vars
+            
         except Exception as e:
             result_data["element_count_error"] = str(e)
 

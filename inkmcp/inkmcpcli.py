@@ -390,6 +390,12 @@ def execute_hybrid_code(client: 'InkscapeClient', code: str, args) -> Dict[str, 
                     shared_context['inkscape_result'] = inkscape_result
                     all_inkscape_results.append(inkscape_result)
                     
+                    # Extract variables from Inkscape execution and add to shared context
+                    # This enables Inkscape → Local variable flow
+                    inkscape_vars = data.get('local_variables', {})
+                    if inkscape_vars:
+                        shared_context.update(inkscape_vars)
+                    
                     if not inkscape_result['execution_successful']:
                         combined_errors.append(f"[Inkscape Block {block_idx + 1}] {inkscape_result.get('errors', '')}")
                 else:
