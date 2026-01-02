@@ -823,14 +823,12 @@ Examples:
                     else:
                         print(json.dumps(result))
                 else:
-                    # Minimal human-readable format
+                    # Minimal human-readable format - only print() output
                     if result.get('success'):
                         data = result.get('response', {}).get('data', {})
-                        output = data.get('local_output', '')
+                        output = data.get('local_output', '').rstrip()
                         if output:
                             print(output)
-                        # Show summary
-                        print(f"\n{data.get('message', 'Hybrid execution completed')}")
                     else:
                         print(f"Error: {result.get('error', 'Unknown error')}", file=sys.stderr)
                 
