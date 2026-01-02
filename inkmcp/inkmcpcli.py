@@ -218,12 +218,16 @@ def serialize_context_variables(local_vars: Dict[str, Any], exclude_names: set =
         if key.startswith('_') or key in exclude_names:
             continue
         
+        # Skip module types automatically (both stdlib and user imports)
+        if type(value).__name__ == 'module':
+            continue
+        
         # Test JSON serializability
         try:
             json.dumps(value)
             serializable[key] = value
         except (TypeError, ValueError) as e:
-            # Provide helpful error message
+            # Provide helpful error message for other non-serializable types
             type_name = type(value).__name__
             module = type(value).__module__
             full_type = f"{module}.{type_name}" if module != 'builtins' else type_name
@@ -311,7 +315,7 @@ def execute_hybrid_code(client: 'InkscapeClient', code: str, args) -> Dict[str, 
                 stderr_out = stderr_capture.getvalue()
                 
                 if stdout_out:
-                    all_local_output.append(f"[Local Block {block_idx + 1}]\\n{stdout_out}")
+                    all_local_output.append(stdout_out)
                 if stderr_out:
                     combined_errors.append(f"[Local Block {block_idx + 1} stderr]\\n{stderr_out}")
                 
