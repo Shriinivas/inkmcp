@@ -137,11 +137,19 @@ def execute_inkscape_block(code: str, variables: Dict[str, Any]) -> Dict[str, An
         # Parse JSON response
         try:
             response = json.loads(result.stdout)
+            # Check if execute-code itself failed
+            if not response.get('success', False):
+                error = response.get('error') or response.get('response', {}).get('data', {}).get('errors', 'Unknown error')
+                return {
+                    'success': False,
+                    'error': error,
+                    'variables': {}
+                }
             return {
-                'success': response.get('success', False),
+                'success': True,
                 'output': response.get('response', {}).get('data', {}).get('output', ''),
-                'error': response.get('error'),
-                'variables': {}  # Inkscape doesn't return variables yet via CLI
+                'error': None,
+                'variables': {}
             }
         except json.JSONDecodeError:
             return {
@@ -216,8 +224,12 @@ def execute_hybrid(code: str):
             result = execute_inkscape_block(block_code, shared_context)
             
             if not result['success']:
+                error_msg = result.get('error')
                 print(f"Error in Inkscape block {block_idx}:", file=sys.stderr)
-                print(result.get('error', 'Unknown error'), file=sys.stderr)
+                if error_msg:
+                    print(error_msg, file=sys.stderr)
+                else:
+                    print("Unknown error - check Inkscape and inkmcpcli.py", file=sys.stderr)
                 return
             
             if result.get('output'):

@@ -3,8 +3,9 @@
 # IMPORTANT: Set INKMCP_CLI_PATH before running Blender:
 #   export INKMCP_CLI_PATH=/path/to/inkmcp/inkmcp/inkmcpcli.py
 
-HYBRID_CODE = """
-# @local
+# IMPORTANT: Start HYBRID_CODE with a magic comment (# @local or # @inkscape)
+# to prevent the first line from being treated as executable code
+HYBRID_CODE = """# @local
 import bpy
 
 # Get the selected curve object
@@ -63,14 +64,14 @@ print("Bezier curve successfully transferred to Inkscape!")
 import sys
 import os
 
-inkmcp_cli = os.environ.get('INKMCP_CLI_PATH')
+inkmcp_cli = os.environ.get("INKMCP_CLI_PATH")
 if not inkmcp_cli:
     print("ERROR: INKMCP_CLI_PATH environment variable not set")
     print("Please run: export INKMCP_CLI_PATH=/path/to/inkmcp/inkmcp/inkmcpcli.py")
 else:
     inkmcp_dir = os.path.dirname(os.path.dirname(inkmcp_cli))
-    hybrid_executor = os.path.join(inkmcp_dir, 'blender_inkscape_hybrid.py')
-    
+    hybrid_executor = os.path.join(inkmcp_dir, "blender_inkscape_hybrid.py")
+
     if not os.path.exists(hybrid_executor):
         print(f"ERROR: Cannot find blender_inkscape_hybrid.py at: {hybrid_executor}")
     else:
