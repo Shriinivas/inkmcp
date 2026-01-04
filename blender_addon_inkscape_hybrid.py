@@ -68,16 +68,30 @@ def serialize_variables(local_vars, exclude_names=None):
         exclude_names = {'__builtins__', '__name__', '__doc__', 'bpy', 'C', 'D'}
     
     serializable = {}
+    excluded = []
+    
     for key, value in local_vars.items():
         if key.startswith('_') or key in exclude_names:
             continue
-        if type(value).__name__ in ('module', 'function', 'type', 'builtin_function_or_method', 'bpy_struct'):
+        
+        type_name = type(value).__name__
+        if type_name in ('module', 'function', 'type', 'builtin_function_or_method', 'bpy_struct'):
+            excluded.append((key, f"non-serializable type ({type_name})"))
             continue
+        
         try:
             json.dumps(value)
             serializable[key] = value
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as e:
+            excluded.append((key, f"not JSON-serializable ({type_name})"))
+    
+    # Warn about excluded variables
+    if excluded:
+        print(f"Note: {len(excluded)} variable(s) excluded from Inkscape context:")
+        for var_name, reason in excluded[:5]:  # Show first 5
+            print(f"  - {var_name}: {reason}")
+        if len(excluded) > 5:
+            print(f"  ... and {len(excluded) - 5} more")
     
     return serializable
 
