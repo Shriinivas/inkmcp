@@ -36,16 +36,23 @@ svg.append(circle)
 import sys
 import os
 
-# Auto-detect path to blender_inkscape_hybrid.py (assumes same directory)
-script_dir = os.path.dirname(os.path.abspath(__file__))
-hybrid_executor = os.path.join(script_dir, 'blender_inkscape_hybrid.py')
-
-if not os.path.exists(hybrid_executor):
-    print("ERROR: Cannot find blender_inkscape_hybrid.py")
-    print(f"Expected at: {hybrid_executor}")
+# Derive blender_inkscape_hybrid.py path from INKMCP_CLI_PATH
+inkmcp_cli = os.environ.get('INKMCP_CLI_PATH')
+if not inkmcp_cli:
+    print("ERROR: INKMCP_CLI_PATH environment variable not set")
+    print("Please run: export INKMCP_CLI_PATH=/path/to/inkmcp/inkmcp/inkmcpcli.py")
 else:
-    # Import and run the executor
-    exec(open(hybrid_executor).read())
+    # inkmcpcli.py is at: inkmcp/inkmcp/inkmcpcli.py
+    # hybrid executor is at: inkmcp/blender_inkscape_hybrid.py
+    # So go up 2 levels from inkmcpcli.py
+    inkmcp_dir = os.path.dirname(os.path.dirname(inkmcp_cli))
+    hybrid_executor = os.path.join(inkmcp_dir, 'blender_inkscape_hybrid.py')
+    
+    if not os.path.exists(hybrid_executor):
+        print(f"ERROR: Cannot find blender_inkscape_hybrid.py at: {hybrid_executor}")
+    else:
+        # Import and run the executor
+        exec(open(hybrid_executor).read())
 
 # Override the main execution to use our HYBRID_CODE
 if __name__ == "__main__":
