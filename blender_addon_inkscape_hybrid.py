@@ -105,14 +105,26 @@ def execute_inkscape_block(code, variables, inkmcp_cli_path):
             'variables': {}
         }
     
-    # Inject variables
-    var_injections = [f"{key} = {repr(value)}" for key, value in variables.items()]
+    # Inject variables with safe repr
+    var_injections = []
+    for key, value in variables.items():
+        try:
+            # Test repr() produces valid Python
+            repr_value = repr(value)
+            if repr_value and repr_value != '':
+                var_injections.append(f"{key} = {repr_value}")
+            else:
+                print(f"Warning: Skipping {key} - repr() returned empty")
+        except Exception as e:
+            print(f"Warning: Cannot inject variable '{key}': {e}")
+    
     full_code = '\n'.join(var_injections) + '\n' + code if var_injections else code
     
     # Write to temp file to avoid shell escaping
     import tempfile
     try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        # UTF-8 encoding to handle special characters (e.g., é in curve names)
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
             f.write(full_code)
             temp_file = f.name
         

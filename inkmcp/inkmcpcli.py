@@ -817,7 +817,7 @@ Examples:
                 print(f"❌ File not found: {args.file}", file=sys.stderr)
                 return 1
 
-            with open(args.file, 'r') as f:
+            with open(args.file, 'r', encoding='utf-8') as f:
                 file_content = f.read().strip()
 
             if args.tag == "execute-hybrid":
@@ -857,11 +857,9 @@ Examples:
                 # Strip comments from code for efficiency
                 cleaned_code = strip_python_comments(file_content)
                 
-                # Build code parameter from file content
-                if params.strip():
-                    params = f"{params} code='{cleaned_code}'"
-                else:
-                    params = f"code='{cleaned_code}'"
+                # Mark that we'll inject code directly (avoids quote escaping issues)
+                execute_code_from_file = cleaned_code
+                params = ""  # Will inject code directly into element_data
                 # Note: execution happens in the unified path below (line ~618)
             elif args.tag == "batch":
                 # For batch command, treat file as batch of command lines
@@ -946,8 +944,14 @@ Examples:
         # Build element data
         element_data = client.build_element_data(args.tag, params)
         
+        # If execute-code was loaded from file, inject code directly
+        if 'execute_code_from_file' in locals():
+            if 'attributes' not in element_data:
+                element_data['attributes'] = {}
+            element_data['attributes']['code'] = execute_code_from_file
+        
         # Strip comments if this is execute-code command
-        if args.tag == 'execute-code' and 'code' in element_data.get('attributes', {}):
+        elif args.tag == 'execute-code' and 'code' in element_data.get('attributes', {}):
             element_data['attributes']['code'] = strip_python_comments(element_data['attributes']['code'])
 
         # Execute command
