@@ -122,6 +122,76 @@ command = "/home/USERNAME/.config/inkscape/extensions/inkmcp/run_inkscape_mcp.sh
 - Hierarchical element creation with groups
 - Automatic ID collision handling
 
+## Hybrid Execution
+
+Execute code seamlessly across multiple Python contexts with automatic variable sharing!
+
+### execute-hybrid CLI Command
+
+Interleave local Python execution with Inkscape operations using magic comments:
+
+```python
+# @local
+import random
+points = [(random.randint(10, 200), random.randint(10, 200)) for _ in range(5)]
+
+# @inkscape
+for x, y in points:
+    circle = Circle()
+    circle.set("cx", str(x))
+    circle.set("cy", str(y))
+    svg.append(circle)
+```
+
+**Features:**
+- 🔄 Full bidirectional variable flow (Local ↔ Inkscape)
+- 🎯 `get_element_by_id()` helper function for reliable element lookup
+- ⚠️ Full error tracebacks with fail-fast behavior
+
+**Usage:**
+```bash
+python inkmcpcli.py execute-hybrid -f script.py
+```
+
+### Blender-Inkscape Addon
+
+Transfer curves and data from Blender to Inkscape in real-time!
+
+**Installation:**
+1. Blender > Edit > Preferences > Add-ons > Install
+2. Select `blender_addon_inkscape_hybrid.py`
+3. Enable "Scripting: Inkscape Hybrid Execution"
+4. Set INKMCP_CLI_PATH to `/path/to/inkmcp/inkmcpcli.py`
+
+**Usage:**
+```python
+# @local - Runs in Blender
+import bpy
+curve = bpy.context.object
+segs = [list(pt.co[:2]) for spline in curve.data.splines 
+        for pt in spline.bezier_points]
+
+# @inkscape - Runs in Inkscape via D-Bus
+for x, y in segs:
+    circle = Circle()
+    circle.set("cx", str(x * 100))
+    svg.append(circle)
+```
+
+Run with: **Text > Run Hybrid Code** (or Ctrl+Shift+H)
+
+**Features:**
+- ✨ One-click execution from Blender text editor
+- 🔄 Automatic variable serialization
+- ⚠️ Helpful warnings for non-serializable Blender objects
+- 🎨 Real-time bezier curve transfer to Inkscape
+
+**Example:** `blender_paste_example.py` - Complete bezier curve visualization
+
+**Note:** Blender objects (Vectors, etc.) must be converted to lists for JSON serialization.
+
+See `BLENDER_HYBRID_README.md` for detailed documentation.
+
 ## Technical Details
 
 ### Architecture
