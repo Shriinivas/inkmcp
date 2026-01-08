@@ -176,7 +176,7 @@ def execute_inkscape_block(code, variables, inkmcp_cli_path):
             'success': True,
             'output': inner_data.get('output', ''),
             'error': None,
-            'variables': {}
+            'variables': inner_data.get('local_variables', {})
         }
     except Exception as e:
         return {
