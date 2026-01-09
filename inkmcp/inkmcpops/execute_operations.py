@@ -117,11 +117,12 @@ def execute_code(extension_instance, svg, attributes: Dict[str, Any]) -> Dict[st
         try:
             if return_output:
                 with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                    # Execute the code in the extension context
-                    exec(code, execution_globals, execution_locals)
+                    # Execute with same dict for globals and locals to avoid scoping issues
+                    # This ensures imports are accessible in function closures
+                    exec(code, execution_globals, execution_globals)
             else:
                 # Execute without capturing output
-                exec(code, execution_globals, execution_locals)
+                exec(code, execution_globals, execution_globals)
 
             result_data["execution_successful"] = True
 
@@ -160,10 +161,16 @@ def execute_code(extension_instance, svg, attributes: Dict[str, Any]) -> Dict[st
             
             # Capture local variables for hybrid execution
             # Serialize variables that were created/modified during execution
+            # Since we use execution_globals for both globals and locals, filter carefully
+            builtin_keys = {'svg', 'self', 'Circle', 'Rectangle', 'Path', 'PathElement', 'Group', 
+                           'get_element_by_id', 'inkex', 'sqrt'}  # Known built-ins and imports
             captured_vars = {}
-            for key, value in execution_locals.items():
+            for key, value in execution_globals.items():
                 # Skip private/magic variables
                 if key.startswith('_'):
+                    continue
+                # Skip known built-ins
+                if key in builtin_keys:
                     continue
                 # Skip modules and non-serializable types
                 if type(value).__name__ in ('module', 'function', 'type', 'builtin_function_or_method'):
