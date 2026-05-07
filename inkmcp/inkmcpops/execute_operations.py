@@ -1,10 +1,11 @@
 """Code execution operations module"""
 
 import io
+import textwrap
 import traceback
 from contextlib import redirect_stdout, redirect_stderr
 from typing import Dict, Any
-from .common import create_success_response, create_error_response
+from .common import create_success_response, create_error_response, get_clean_tag_name
 
 
 def execute_code(extension_instance, svg, attributes: Dict[str, Any]) -> Dict[str, Any]:
@@ -96,8 +97,6 @@ def execute_code(extension_instance, svg, attributes: Dict[str, Any]) -> Dict[st
         
         execution_globals['get_element_by_id'] = get_element_by_id
 
-        execution_locals = {}
-
         # Capture output if requested
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()
@@ -115,20 +114,40 @@ def execute_code(extension_instance, svg, attributes: Dict[str, Any]) -> Dict[st
         elements_before = len(list(svg.iter()))
 
         try:
+            executable_code = code
+            wraps_top_level_return = False
+
+            try:
+                compile(code, "<inkscape-execute-code>", "exec")
+            except SyntaxError as e:
+                if "'return' outside function" in str(e):
+                    wraps_top_level_return = True
+                    executable_code = (
+                        "def __mcp_user_code__():\n"
+                        f"{textwrap.indent(code, '    ')}\n"
+                        "__mcp_return_value__ = __mcp_user_code__()"
+                    )
+                else:
+                    raise
+
             if return_output:
                 with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
                     # Execute with same dict for globals and locals to avoid scoping issues
                     # This ensures imports are accessible in function closures
-                    exec(code, execution_globals, execution_globals)
+                    exec(executable_code, execution_globals, execution_globals)
             else:
                 # Execute without capturing output
-                exec(code, execution_globals, execution_globals)
+                exec(executable_code, execution_globals, execution_globals)
 
             result_data["execution_successful"] = True
 
             # Capture any return value
-            if 'result' in execution_locals:
-                result_data["return_value"] = str(execution_locals['result'])
+            if wraps_top_level_return and "__mcp_return_value__" in execution_globals:
+                result_data["return_value"] = str(
+                    execution_globals["__mcp_return_value__"]
+                )
+            elif "result" in execution_globals:
+                result_data["return_value"] = str(execution_globals["result"])
 
         except Exception as e:
             error_traceback = traceback.format_exc()
@@ -154,7 +173,9 @@ def execute_code(extension_instance, svg, attributes: Dict[str, Any]) -> Dict[st
             # Get element counts by type
             element_counts = {}
             for element in svg.iter():
-                tag = element.tag.split('}')[-1] if '}' in element.tag else element.tag
+                tag = get_clean_tag_name(element)
+                if tag is None:
+                    continue
                 element_counts[tag] = element_counts.get(tag, 0) + 1
 
             result_data["current_element_counts"] = element_counts

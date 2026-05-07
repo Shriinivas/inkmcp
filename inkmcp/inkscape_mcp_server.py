@@ -189,22 +189,73 @@ def format_response(result: Dict[str, Any]) -> str:
             details.append(f"**ID**: `{data['id']}`")
         if "tag" in data:
             details.append(f"**Type**: {data['tag']}")
+        if "label" in data and data["label"]:
+            details.append(f"**Label**: {data['label']}")
+        if "child_count" in data:
+            details.append(f"**Child Elements**: {data['child_count']}")
+        if "text" in data:
+            details.append(f"**Text**: {data['text']}")
 
         # Selection/info details
         if "count" in data:
             details.append(f"**Count**: {data['count']}")
+        if "selectedIds" in data and data["selectedIds"]:
+            details.append("**Selected IDs**:")
+            for selected_id in data["selectedIds"][:8]:
+                details.append(f"  {selected_id}")
+            if len(data["selectedIds"]) > 8:
+                details.append(f"  ... and {len(data['selectedIds']) - 8} more")
         if "elements" in data:
             elements = data["elements"]
             if elements:
                 details.append(f"**Elements**: {len(elements)} items")
                 # Show first few elements
                 for i, elem in enumerate(elements[:3]):
-                    elem_desc = (
-                        f"{elem.get('tag', 'unknown')} ({elem.get('id', 'no-id')})"
-                    )
+                    elem_desc = f"{elem.get('tag', 'unknown')} ({elem.get('id', 'no-id')})"
+                    if elem.get("label"):
+                        elem_desc += f" label={elem['label']}"
+                    if elem.get("text"):
+                        elem_desc += f" text={elem['text']!r}"
                     details.append(f"  {i + 1}. {elem_desc}")
                 if len(elements) > 3:
                     details.append(f"  ... and {len(elements) - 3} more")
+        if "dimensions" in data:
+            dimensions = data["dimensions"]
+            details.append(
+                f"**Canvas**: {dimensions.get('width', 'unknown')} × {dimensions.get('height', 'unknown')}"
+            )
+        if "viewBox" in data:
+            viewbox = data["viewBox"]
+            if isinstance(viewbox, list) and len(viewbox) == 4:
+                details.append(f"**ViewBox**: {' '.join(viewbox)}")
+        if "elementCounts" in data:
+            element_counts = data["elementCounts"]
+            if element_counts:
+                total_elements = sum(
+                    count for count in element_counts.values() if isinstance(count, int)
+                )
+                details.append(f"**Total Elements**: {total_elements}")
+
+                top_counts = sorted(
+                    element_counts.items(), key=lambda item: (-item[1], item[0])
+                )[:8]
+                details.append("**Element Types**:")
+                for tag, count in top_counts:
+                    details.append(f"  {tag}: {count}")
+        if "attributes" in data and data["attributes"]:
+            attributes = data["attributes"]
+            details.append("**Attributes**:")
+            for key in sorted(attributes.keys())[:10]:
+                details.append(f"  {key}={attributes[key]}")
+            if len(attributes) > 10:
+                details.append(f"  ... and {len(attributes) - 10} more")
+        if "style" in data and data["style"]:
+            style = data["style"]
+            details.append("**Style**:")
+            for key in sorted(style.keys())[:10]:
+                details.append(f"  {key}: {style[key]}")
+            if len(style) > 10:
+                details.append(f"  ... and {len(style) - 10} more")
 
         # Export details
         if "export_path" in data:
@@ -218,6 +269,14 @@ def format_response(result: Dict[str, Any]) -> str:
                 details.append("**Execution**: ✅ Success")
             else:
                 details.append("**Execution**: ❌ Failed")
+        if data.get("return_value") not in (None, ""):
+            details.append(f"**Return Value**: {data['return_value']}")
+        if data.get("output"):
+            details.append("**Output**:")
+            details.append(data["output"].rstrip())
+        if data.get("errors"):
+            details.append("**Errors**:")
+            details.append(data["errors"].rstrip())
         if "elements_created" in data and data["elements_created"]:
             details.append(f"**Created**: {len(data['elements_created'])} elements")
 

@@ -16,6 +16,8 @@ from inkmcp.inkmcpops.element_mapping import (
     get_unique_id,
 )
 from inkmcp.inkmcpops.common import get_element_info_data
+from inkmcp.inkmcpops.common import get_clean_tag_name
+from inkmcp.inkmcpops.common import count_element_types
 from inkmcp.inkmcpops.export_operations import export_document_image
 from inkmcp.inkmcpops.execute_operations import execute_code
 
@@ -168,6 +170,8 @@ class ElementCreator(inkex.EffectExtension):
                     "message": "Selection information retrieved successfully",
                     "count": len(selected),
                     "elements": elements,
+                    "elementCounts": count_element_types(selected.values()),
+                    "selectedIds": [element.get("id", "no-id") for element in selected.values()],
                 },
             }
         except Exception as e:
@@ -186,7 +190,9 @@ class ElementCreator(inkex.EffectExtension):
             # Count elements by type
             element_counts = {}
             for elem in svg.iter():
-                tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+                tag = get_clean_tag_name(elem)
+                if tag is None:
+                    continue
                 element_counts[tag] = element_counts.get(tag, 0) + 1
 
             return {
@@ -207,7 +213,12 @@ class ElementCreator(inkex.EffectExtension):
     def get_element_info(self, svg, element_id: str) -> Dict[str, Any]:
         """Get information about specific element"""
         try:
-            element = svg.getElementById(element_id)
+            element = None
+            for candidate in svg.iter():
+                if candidate.get("id") == element_id:
+                    element = candidate
+                    break
+
             if element is None:
                 return {
                     "status": "error",
@@ -219,6 +230,7 @@ class ElementCreator(inkex.EffectExtension):
                 "status": "success",
                 "data": {
                     "message": f"Element information for {element_id}",
+                    "requested_id": element_id,
                     **element_info,
                 },
             }
