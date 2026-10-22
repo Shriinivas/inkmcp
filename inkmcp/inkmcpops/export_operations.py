@@ -4,7 +4,7 @@ import tempfile
 import base64
 import os
 from typing import Dict, Any
-from inkex.command import call
+from inkex.command import inkscape
 from .common import create_success_response, create_error_response
 
 
@@ -48,12 +48,12 @@ def export_document_image(extension_instance, svg, attributes: Dict[str, Any]) -
                 if max_size < width:
                     dpi = int((max_size / width) * 96)
 
-            call('inkscape',
-                 '--export-type=png',
-                 f'--export-filename={output_path}',
-                 f'--export-dpi={dpi}',
-                 export_area,
-                 temp_svg)
+            # inkex resolves the running Inkscape binary (inkscape.exe on Windows)
+            inkscape(temp_svg,
+                     '--export-type=png',
+                     f'--export-filename={output_path}',
+                     f'--export-dpi={dpi}',
+                     export_area)
         else:
             return create_error_response(f"Unsupported format: {format_type}")
 

@@ -69,9 +69,10 @@ import sys
 import json
 import tempfile
 import os
-import subprocess
 import re
 from typing import Dict, List, Any
+
+from inkscape_bus import BusError, activate_mcp_action
 
 
 def strip_python_comments(code: str) -> str:
@@ -610,16 +611,7 @@ def parse_attributes(param_str: str) -> Dict[str, Any]:
 
 
 class InkscapeClient:
-    """D-Bus client for SVG element creation"""
-
-    def __init__(self):
-        self.dbus_service = "org.inkscape.Inkscape"
-        self.dbus_path = "/org/inkscape/Inkscape"
-        self.dbus_interface = "org.gtk.Actions"
-        self.action_name = "org.khema.inkscape.mcp"
-
-
-
+    """Session-bus client for SVG element creation"""
 
     def build_element_data(self, tag: str, param_str: str) -> Dict[str, Any]:
         """
@@ -638,7 +630,7 @@ class InkscapeClient:
         return result if result is not None else {"tag": tag, "attributes": {}}
 
     def execute_command(self, element_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute command via D-Bus"""
+        """Execute command via the Inkscape extension action"""
         try:
             # Create temporary response file for reverse communication (like original system)
             response_fd, response_file = tempfile.mkstemp(suffix='.json', prefix='inkmcp_response_')
@@ -650,24 +642,7 @@ class InkscapeClient:
             with open(params_file, 'w') as f:
                 json.dump(element_data, f)
 
-            # Execute D-Bus command (like original system)
-            cmd = [
-                "gdbus", "call",
-                "--session",
-                "--dest", self.dbus_service,
-                "--object-path", self.dbus_path,
-                "--method", f"{self.dbus_interface}.Activate",
-                self.action_name,
-                "[]", "{}"
-            ]
-
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-            if result.returncode != 0:
-                return {
-                    "success": False,
-                    "error": f"D-Bus command failed: {result.stderr}"
-                }
+            activate_mcp_action(timeout=30)
 
             # Read response from response file (like original system)
             if os.path.exists(response_file):
@@ -682,12 +657,12 @@ class InkscapeClient:
                         "error": f"Failed to read response: {str(e)}"
                     }
 
-            return {"success": True, "output": result.stdout}
+            return {"success": True, "output": ""}
 
-        except subprocess.TimeoutExpired:
+        except BusError as e:
             return {
                 "success": False,
-                "error": "Command timed out after 30 seconds"
+                "error": str(e)
             }
         except Exception as e:
             return {

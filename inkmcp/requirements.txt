@@ -1,3 +1,2 @@
-fastmcp>=2.0.0
-inkex
-lxml
+# The server imports mcp.server.fastmcp, which exists only in the 1.x SDK.
+mcp>=1.2,<2

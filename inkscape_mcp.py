@@ -248,7 +248,10 @@ class ElementCreator(inkex.EffectExtension):
                     "status": "error",
                     "data": {"error": "No parameters file found"},
                 }
-                self.write_response(response, "/tmp/error_response.json")
+                self.write_response(
+                    response,
+                    os.path.join(tempfile.gettempdir(), "inkmcp_error_response.json"),
+                )
                 return
 
             with open(params_file, "r") as f:

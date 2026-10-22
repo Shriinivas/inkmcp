@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Inkscape MCP Server
-Model Context Protocol server for controlling Inkscape via D-Bus extension
+Model Context Protocol server for controlling Inkscape via its session-bus extension
 
 Provides access to Inkscape operations through a unified tool interface
 for SVG element creation, document manipulation, and code execution.
@@ -10,14 +10,14 @@ for SVG element creation, document manipulation, and code execution.
 import json
 import logging
 import os
-import subprocess
 import tempfile
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any, AsyncIterator, Dict, Optional, Union
 
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import ImageContent
+
+from inkscape_bus import ACTION_NAME, BusError, activate_mcp_action, list_actions
 
 # Configure logging
 logging.basicConfig(
@@ -25,53 +25,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger("InkscapeMCP")
 
-# Server configuration
-DEFAULT_DBUS_SERVICE = "org.inkscape.Inkscape"
-DEFAULT_DBUS_PATH = "/org/inkscape/Inkscape"
-DEFAULT_DBUS_INTERFACE = "org.gtk.Actions"
-DEFAULT_ACTION_NAME = "org.khema.inkscape.mcp"
-
 
 class InkscapeConnection:
-    """Manages D-Bus connection to Inkscape"""
+    """Manages the session-bus connection to Inkscape"""
 
-    def __init__(self):
-        self.dbus_service = DEFAULT_DBUS_SERVICE
-        self.dbus_path = DEFAULT_DBUS_PATH
-        self.dbus_interface = DEFAULT_DBUS_INTERFACE
-        self.action_name = DEFAULT_ACTION_NAME
-        self._client_path = Path(__file__).parent / "inkmcpcli.py"
-
-    def is_available(self) -> bool:
-        """Check if Inkscape is running and MCP extension is available"""
+    def availability_error(self) -> Optional[str]:
+        """Return None when Inkscape and the MCP action are reachable, else the reason"""
         try:
-            cmd = [
-                "gdbus",
-                "call",
-                "--session",
-                "--dest",
-                self.dbus_service,
-                "--object-path",
-                self.dbus_path,
-                "--method",
-                f"{self.dbus_interface}.List",
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-
-            if result.returncode != 0:
-                logger.warning("Inkscape D-Bus service not available")
-                return False
-
-            # Check if our generic MCP extension action is listed
-            output = result.stdout
-            return self.action_name in output
-
+            names = list_actions(timeout=5)
+        except BusError as e:
+            return str(e)
         except Exception as e:
-            logger.error(f"Error checking Inkscape availability: {e}")
-            return False
+            return f"Error checking Inkscape availability: {e}"
+
+        if ACTION_NAME not in names:
+            return (
+                f"Inkscape is running but the MCP extension action '{ACTION_NAME}' "
+                "is not registered. Install the extension and restart Inkscape."
+            )
+
+        return None
 
     def execute_operation(self, operation_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute operation using CLI client"""
+        """Execute operation through the extension action"""
         try:
             # Write operation data to temporary file
             params_file = os.path.join(tempfile.gettempdir(), "mcp_params.json")
@@ -79,30 +55,7 @@ class InkscapeConnection:
             with open(params_file, "w") as f:
                 json.dump(operation_data, f)
 
-            # Execute via D-Bus
-            cmd = [
-                "gdbus",
-                "call",
-                "--session",
-                "--dest",
-                self.dbus_service,
-                "--object-path",
-                self.dbus_path,
-                "--method",
-                f"{self.dbus_interface}.Activate",
-                self.action_name,
-                "[]",
-                "{}",
-            ]
-
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-
-            if result.returncode != 0:
-                logger.error(f"D-Bus command failed: {result.stderr}")
-                return {
-                    "status": "error",
-                    "data": {"error": f"D-Bus call failed: {result.stderr}"},
-                }
+            activate_mcp_action(timeout=30)
 
             # Read response from response file
             response_file = operation_data.get("response_file")
@@ -122,9 +75,9 @@ class InkscapeConnection:
                 # Assume success if no response file specified
                 return {"status": "success", "data": {"message": "Operation completed"}}
 
-        except subprocess.TimeoutExpired:
-            logger.error("Operation timed out")
-            return {"status": "error", "data": {"error": "Operation timed out"}}
+        except BusError as e:
+            logger.error(f"Bus call failed: {e}")
+            return {"status": "error", "data": {"error": str(e)}}
         except Exception as e:
             logger.error(f"Operation execution error: {e}")
             return {"status": "error", "data": {"error": str(e)}}
@@ -141,10 +94,11 @@ def get_inkscape_connection() -> InkscapeConnection:
     if _inkscape_connection is None:
         _inkscape_connection = InkscapeConnection()
 
-    if not _inkscape_connection.is_available():
+    error = _inkscape_connection.availability_error()
+    if error:
         raise Exception(
-            "Inkscape is not running or generic MCP extension is not available. "
-            "Please start Inkscape and ensure the generic MCP extension is installed."
+            f"Cannot reach Inkscape: {error} "
+            "Please start Inkscape and ensure the MCP extension is installed."
         )
 
     return _inkscape_connection

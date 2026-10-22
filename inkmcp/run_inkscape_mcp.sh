@@ -1,21 +1,12 @@
 #!/bin/bash
-# Inkscape MCP Server Wrapper Script
-# Activates Python environment and runs the MCP server
+# Inkscape MCP Server launcher for Linux/macOS.
+# Exports the D-Bus session address, then delegates to the cross-platform
+# Python launcher (venv bootstrap + server start).
 
 set -e
 
 # Change to script directory
 cd "$(dirname "$0")"
-
-# Activate Python virtual environment (create if doesn't exist)
-if [ ! -d "venv" ]; then
-    echo "Creating Python virtual environment..."
-    python3 -m venv venv
-    source venv/bin/activate
-    pip install -r requirements.txt
-else
-    source venv/bin/activate
-fi
 
 # Ensure access to the user's D-Bus session bus
 # Allow overrides if already provided in the environment
@@ -23,5 +14,4 @@ fi
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${XDG_RUNTIME_DIR}/bus}"
 
-# Run the Inkscape MCP server
-exec python main.py
+exec python3 run_inkscape_mcp.py "$@"
